@@ -10,7 +10,7 @@ import sys
 from datetime import datetime
 
 # Base URL from environment
-BASE_URL = "https://project-pulse-293.preview.emergentagent.com"
+BASE_URL = "https://workflow-hub-274.preview.emergentagent.com"
 API_BASE = f"{BASE_URL}/api"
 
 class APITester:
