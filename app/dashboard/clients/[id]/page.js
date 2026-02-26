@@ -265,6 +265,29 @@ export default function ClientDetailPage() {
     setReports(rs => rs.filter(r => r.id !== reportId))
   }
 
+  const updateContent = async (contentId, field, value) => {
+    setSaving(s => ({ ...s, [`c_${contentId}`]: true }))
+    setContent(cs => cs.map(c => c.id === contentId ? { ...c, [field]: value } : c))
+    await apiFetch(`/api/content/${contentId}`, { method: 'PUT', body: JSON.stringify({ [field]: value }) })
+    setSaving(s => ({ ...s, [`c_${contentId}`]: false }))
+  }
+
+  const addContent = async () => {
+    if (!newContent.blog_title.trim()) return
+    setAddingContent(true)
+    const res = await apiFetch('/api/content', { method: 'POST', body: JSON.stringify({ ...newContent, client_id: id }) })
+    const item = await res.json()
+    setContent(cs => [item, ...cs])
+    setNewContent({ blog_title: '' })
+    setAddingContent(false)
+  }
+
+  const deleteContent = async (contentId) => {
+    if (!confirm('Delete this content item?')) return
+    await apiFetch(`/api/content/${contentId}`, { method: 'DELETE' })
+    setContent(cs => cs.filter(c => c.id !== contentId))
+  }
+
   const completedTasks = tasks.filter(t => t.status === 'Completed').length
   const progress       = tasks.length > 0 ? Math.round((completedTasks / tasks.length) * 100) : 0
   const memberMap      = Object.fromEntries(members.map(m => [m.id, m.name]))
