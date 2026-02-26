@@ -460,6 +460,128 @@ export default function ClientDetailPage() {
           </div>
         </TabsContent>
 
+        {/* ── Content Calendar Tab ─────────────────────────────────────────── */}
+        <TabsContent value="content">
+          <div className="bg-white border border-gray-200 rounded-lg overflow-auto">
+            <table className="w-full text-sm" style={{ minWidth: '1400px' }}>
+              <thead>
+                <tr className="border-b border-gray-100 bg-gray-50 sticky top-0 z-10">
+                  <th className="w-5 px-2 py-2.5"></th>
+                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600" style={{ minWidth: 60 }}>Week</th>
+                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600" style={{ minWidth: 200 }}>Blog Title</th>
+                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600" style={{ minWidth: 120 }}>Primary Keyword</th>
+                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Writer</th>
+                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Outline Status</th>
+                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Topic Approval</th>
+                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Blog Status</th>
+                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Blog Approval</th>
+                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Blog Link</th>
+                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Published</th>
+                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Comments</th>
+                  <th className="px-2 py-2.5 w-6"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {content.map(item => (
+                  <tr key={item.id} className="hover:bg-gray-50 group">
+                    <td className="px-2 py-1.5">
+                      {saving[`c_${item.id}`] && <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse mx-auto" />}
+                    </td>
+                    <td className="px-3 py-1.5">
+                      <EditableCell value={item.week} onSave={v => updateContent(item.id, 'week', v)} placeholder="Week 1" />
+                    </td>
+                    <td className="px-3 py-1.5">
+                      <EditableCell value={item.blog_title} onSave={v => updateContent(item.id, 'blog_title', v)} />
+                    </td>
+                    <td className="px-3 py-1.5">
+                      <EditableCell value={item.primary_keyword} onSave={v => updateContent(item.id, 'primary_keyword', v)} placeholder="keyword" />
+                    </td>
+                    <td className="px-3 py-1.5">
+                      <EditableCell value={item.writer} onSave={v => updateContent(item.id, 'writer', v)} placeholder="Writer" />
+                    </td>
+                    <td className="px-3 py-1.5">
+                      <EditableCell value={item.outline_status} type="select" options={OUTLINE_STATUSES} onSave={v => updateContent(item.id, 'outline_status', v)} />
+                    </td>
+                    <td className="px-3 py-1.5">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border cursor-pointer hover:ring-1 hover:ring-blue-200 ${topicApprovalColors[item.topic_approval_status] || 'bg-gray-100 text-gray-500 border-gray-200'}`}
+                        onClick={() => {
+                          const opts = TOPIC_APPROVALS
+                          const idx = opts.indexOf(item.topic_approval_status || 'Pending')
+                          const next = opts[(idx + 1) % opts.length]
+                          updateContent(item.id, 'topic_approval_status', next)
+                        }}>
+                        {item.topic_approval_status || 'Pending'}
+                      </span>
+                    </td>
+                    <td className="px-3 py-1.5">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border cursor-pointer hover:ring-1 hover:ring-blue-200 ${blogStatusColors[item.blog_status] || 'bg-gray-100 text-gray-600 border-gray-200'}`}
+                        onClick={() => {
+                          const opts = BLOG_STATUSES
+                          const idx = opts.indexOf(item.blog_status || 'Draft')
+                          const next = opts[(idx + 1) % opts.length]
+                          updateContent(item.id, 'blog_status', next)
+                        }}>
+                        {item.blog_status || 'Draft'}
+                      </span>
+                    </td>
+                    <td className="px-3 py-1.5">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border cursor-pointer hover:ring-1 hover:ring-blue-200 ${approvalColors[item.blog_approval_status] || 'bg-gray-100 text-gray-500 border-gray-200'}`}
+                        onClick={() => {
+                          const opts = BLOG_APPROVALS
+                          const idx = opts.indexOf(item.blog_approval_status || 'Pending Review')
+                          const next = opts[(idx + 1) % opts.length]
+                          updateContent(item.id, 'blog_approval_status', next)
+                        }}>
+                        {item.blog_approval_status || 'Pending Review'}
+                      </span>
+                    </td>
+                    <td className="px-3 py-1.5">
+                      <LinkCell value={item.blog_link} onSave={v => updateContent(item.id, 'blog_link', v)} />
+                    </td>
+                    <td className="px-3 py-1.5">
+                      <EditableCell value={item.published_date} type="date" onSave={v => updateContent(item.id, 'published_date', v)} />
+                    </td>
+                    <td className="px-3 py-1.5">
+                      <EditableCell value={item.comments} onSave={v => updateContent(item.id, 'comments', v)} placeholder="Notes..." />
+                    </td>
+                    <td className="px-2 py-1.5">
+                      <button onClick={() => deleteContent(item.id)}
+                        className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-50 text-red-400 transition-all">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {/* Add row */}
+                <tr className="bg-gray-50 border-t border-dashed border-gray-200">
+                  <td className="px-2 py-2"></td>
+                  <td className="px-3 py-2" colSpan={2}>
+                    <input
+                      type="text" value={newContent.blog_title}
+                      onChange={e => setNewContent(n => ({ ...n, blog_title: e.target.value }))}
+                      onKeyDown={e => e.key === 'Enter' && addContent()}
+                      placeholder="+ Add a blog post..."
+                      className="w-full text-xs px-2 py-1 bg-transparent border border-dashed border-gray-300 rounded focus:outline-none focus:border-blue-400 focus:bg-white"
+                      disabled={addingContent}
+                    />
+                  </td>
+                  <td colSpan={11} className="px-3 py-2">
+                    <Button size="sm" variant="ghost" onClick={addContent} disabled={addingContent || !newContent.blog_title.trim()} className="text-xs h-7">
+                      <Plus className="w-3 h-3 mr-1" />{addingContent ? 'Adding...' : 'Add'}
+                    </Button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          {content.length === 0 && (
+            <div className="text-center py-12 text-gray-400 bg-white border border-gray-200 rounded-lg mt-2">
+              <FileText className="w-8 h-8 mx-auto mb-2 text-gray-200" />
+              No content calendar items yet. Add your first blog post above.
+            </div>
+          )}
+        </TabsContent>
+
         {/* ── Reports Tab ───────────────────────────────────────────────── */}
         <TabsContent value="reports">
           <div className="flex justify-end mb-4">
