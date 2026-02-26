@@ -607,6 +607,373 @@ class APITester:
             self.log_test("Portal Behno Password Protection", False, error_msg="Invalid JSON response")
             return False
 
+    def test_get_content_items_empty(self):
+        """Test GET /api/content - List content items (empty initially)"""
+        response, error = self.make_request("GET", "/content")
+        if error:
+            self.log_test("Get Content Items (Empty)", False, error_msg=error)
+            return False
+            
+        if response.status_code != 200:
+            self.log_test("Get Content Items (Empty)", False, 
+                         error_msg=f"Status {response.status_code}: {response.text}")
+            return False
+            
+        try:
+            items = response.json()
+            if not isinstance(items, list):
+                self.log_test("Get Content Items (Empty)", False, error_msg="Response is not a list")
+                return False
+                
+            self.log_test("Get Content Items (Empty)", True, 
+                         f"Retrieved {len(items)} content items (expected 0 initially)")
+            return True
+        except json.JSONDecodeError:
+            self.log_test("Get Content Items (Empty)", False, error_msg="Invalid JSON response")
+            return False
+
+    def test_create_content_item(self):
+        """Test POST /api/content - Create new content item"""
+        if not self.auth_token:
+            self.log_test("Create Content Item", False, error_msg="No auth token available")
+            return False
+            
+        if not self.bandolier_client_id:
+            self.log_test("Create Content Item", False, error_msg="Bandolier client ID not available")
+            return False
+            
+        content_data = {
+            "blog_title": "Top 10 SEO Tips for E-commerce",
+            "client_id": self.bandolier_client_id,
+            "week": "Week 1",
+            "blog_type": "Listicle",
+            "primary_keyword": "ecommerce seo tips",
+            "secondary_keywords": "online store seo, ecommerce optimization",
+            "writer": "Sarah Chen",
+            "comments": "Focus on practical actionable tips",
+            "outline": "1. Keyword research\n2. Product page optimization\n3. Technical SEO\n4. Link building",
+            "outline_status": "Pending",
+            "topic_approval_status": "Pending",
+            "blog_approval_status": "Pending Review",
+            "blog_status": "Draft"
+        }
+        
+        response, error = self.make_request("POST", "/content", content_data)
+        if error:
+            self.log_test("Create Content Item", False, error_msg=error)
+            return False
+            
+        if response.status_code not in [200, 201]:
+            self.log_test("Create Content Item", False, 
+                         error_msg=f"Status {response.status_code}: {response.text}")
+            return False
+            
+        try:
+            item = response.json()
+            if item.get("blog_title") != content_data["blog_title"]:
+                self.log_test("Create Content Item", False, error_msg="Created content title mismatch")
+                return False
+                
+            if item.get("client_id") != self.bandolier_client_id:
+                self.log_test("Create Content Item", False, error_msg="Created content client_id mismatch")
+                return False
+                
+            self.created_content_id = item.get("id")
+            self.log_test("Create Content Item", True, f"Created content: {item.get('blog_title')}")
+            return True
+        except json.JSONDecodeError:
+            self.log_test("Create Content Item", False, error_msg="Invalid JSON response")
+            return False
+
+    def test_get_content_items_with_data(self):
+        """Test GET /api/content - List content items with data"""
+        response, error = self.make_request("GET", "/content")
+        if error:
+            self.log_test("Get Content Items (With Data)", False, error_msg=error)
+            return False
+            
+        if response.status_code != 200:
+            self.log_test("Get Content Items (With Data)", False, 
+                         error_msg=f"Status {response.status_code}: {response.text}")
+            return False
+            
+        try:
+            items = response.json()
+            if not isinstance(items, list):
+                self.log_test("Get Content Items (With Data)", False, error_msg="Response is not a list")
+                return False
+                
+            if len(items) < 1:
+                self.log_test("Get Content Items (With Data)", False, 
+                             error_msg=f"Expected at least 1 content item, got {len(items)}")
+                return False
+                
+            # Check enrichment with client_name
+            for item in items:
+                if "client_name" not in item:
+                    self.log_test("Get Content Items (With Data)", False, 
+                                 error_msg="Missing client_name enrichment")
+                    return False
+                    
+            self.log_test("Get Content Items (With Data)", True, 
+                         f"Retrieved {len(items)} content items with client names")
+            return True
+        except json.JSONDecodeError:
+            self.log_test("Get Content Items (With Data)", False, error_msg="Invalid JSON response")
+            return False
+
+    def test_get_content_by_client_id(self):
+        """Test GET /api/content?client_id=xxx - Filter content by client"""
+        if not self.bandolier_client_id:
+            self.log_test("Get Content by Client ID", False, error_msg="Bandolier client ID not available")
+            return False
+            
+        response, error = self.make_request("GET", f"/content?client_id={self.bandolier_client_id}")
+        if error:
+            self.log_test("Get Content by Client ID", False, error_msg=error)
+            return False
+            
+        if response.status_code != 200:
+            self.log_test("Get Content by Client ID", False, 
+                         error_msg=f"Status {response.status_code}: {response.text}")
+            return False
+            
+        try:
+            items = response.json()
+            if not isinstance(items, list):
+                self.log_test("Get Content by Client ID", False, error_msg="Response is not a list")
+                return False
+                
+            # All items should belong to Bandolier
+            for item in items:
+                if item.get("client_id") != self.bandolier_client_id:
+                    self.log_test("Get Content by Client ID", False, 
+                                 error_msg=f"Found content for wrong client: {item.get('client_id')}")
+                    return False
+                if item.get("client_name") != "Bandolier":
+                    self.log_test("Get Content by Client ID", False, 
+                                 error_msg=f"Wrong client_name: {item.get('client_name')}")
+                    return False
+                    
+            self.log_test("Get Content by Client ID", True, 
+                         f"Retrieved {len(items)} content items for Bandolier")
+            return True
+        except json.JSONDecodeError:
+            self.log_test("Get Content by Client ID", False, error_msg="Invalid JSON response")
+            return False
+
+    def test_get_single_content_item(self):
+        """Test GET /api/content/:id - Get single content item"""
+        if not hasattr(self, 'created_content_id') or not self.created_content_id:
+            self.log_test("Get Single Content Item", False, error_msg="No created content ID available")
+            return False
+            
+        response, error = self.make_request("GET", f"/content/{self.created_content_id}")
+        if error:
+            self.log_test("Get Single Content Item", False, error_msg=error)
+            return False
+            
+        if response.status_code != 200:
+            self.log_test("Get Single Content Item", False, 
+                         error_msg=f"Status {response.status_code}: {response.text}")
+            return False
+            
+        try:
+            item = response.json()
+            if item.get("id") != self.created_content_id:
+                self.log_test("Get Single Content Item", False, error_msg="Wrong content ID returned")
+                return False
+                
+            if item.get("blog_title") != "Top 10 SEO Tips for E-commerce":
+                self.log_test("Get Single Content Item", False, 
+                             error_msg=f"Wrong blog_title: {item.get('blog_title')}")
+                return False
+                
+            self.log_test("Get Single Content Item", True, 
+                         f"Retrieved content item: {item.get('blog_title')}")
+            return True
+        except json.JSONDecodeError:
+            self.log_test("Get Single Content Item", False, error_msg="Invalid JSON response")
+            return False
+
+    def test_update_content_item(self):
+        """Test PUT /api/content/:id - Update content item status"""
+        if not self.auth_token:
+            self.log_test("Update Content Item", False, error_msg="No auth token available")
+            return False
+            
+        if not hasattr(self, 'created_content_id') or not self.created_content_id:
+            self.log_test("Update Content Item", False, error_msg="No created content ID available")
+            return False
+            
+        update_data = {
+            "blog_status": "In Progress",
+            "topic_approval_status": "Approved",
+            "topic_approval_date": "2025-01-15",
+            "outline_status": "Submitted",
+            "writer": "Mike Torres"
+        }
+        
+        response, error = self.make_request("PUT", f"/content/{self.created_content_id}", update_data)
+        if error:
+            self.log_test("Update Content Item", False, error_msg=error)
+            return False
+            
+        if response.status_code != 200:
+            self.log_test("Update Content Item", False, 
+                         error_msg=f"Status {response.status_code}: {response.text}")
+            return False
+            
+        try:
+            item = response.json()
+            if item.get("blog_status") != update_data["blog_status"]:
+                self.log_test("Update Content Item", False, error_msg="blog_status not updated")
+                return False
+                
+            if item.get("topic_approval_status") != update_data["topic_approval_status"]:
+                self.log_test("Update Content Item", False, error_msg="topic_approval_status not updated")
+                return False
+                
+            self.log_test("Update Content Item", True, 
+                         "Content item updated successfully with status changes")
+            return True
+        except json.JSONDecodeError:
+            self.log_test("Update Content Item", False, error_msg="Invalid JSON response")
+            return False
+
+    def test_bulk_import_content(self):
+        """Test POST /api/content/bulk - Bulk import content items"""
+        if not self.auth_token:
+            self.log_test("Bulk Import Content", False, error_msg="No auth token available")
+            return False
+            
+        if not self.bandolier_client_id:
+            self.log_test("Bulk Import Content", False, error_msg="Bandolier client ID not available")
+            return False
+            
+        bulk_content = {
+            "client_id": self.bandolier_client_id,
+            "items": [
+                {
+                    "week": "Week 2",
+                    "blog_type": "How-to Guide",
+                    "blog_title": "How to Optimize Product Images for SEO",
+                    "primary_keyword": "product image seo",
+                    "secondary_keywords": "image optimization, alt text",
+                    "writer": "Sarah Chen",
+                    "outline": "1. Image file names\n2. Alt text optimization\n3. Image compression",
+                    "blog_status": "Draft"
+                },
+                {
+                    "week": "Week 3", 
+                    "blog_type": "Case Study",
+                    "blog_title": "Case Study: 300% Traffic Increase with Technical SEO",
+                    "primary_keyword": "technical seo case study",
+                    "secondary_keywords": "seo results, website optimization",
+                    "writer": "Priya Nair",
+                    "outline": "1. Initial audit\n2. Technical fixes\n3. Results analysis",
+                    "blog_status": "Draft"
+                }
+            ]
+        }
+        
+        response, error = self.make_request("POST", "/content/bulk", bulk_content)
+        if error:
+            self.log_test("Bulk Import Content", False, error_msg=error)
+            return False
+            
+        if response.status_code not in [200, 201]:
+            self.log_test("Bulk Import Content", False, 
+                         error_msg=f"Status {response.status_code}: {response.text}")
+            return False
+            
+        try:
+            result = response.json()
+            if result.get("imported") != 2:
+                self.log_test("Bulk Import Content", False, 
+                             error_msg=f"Expected 2 imported items, got {result.get('imported')}")
+                return False
+                
+            self.log_test("Bulk Import Content", True, 
+                         f"Successfully imported {result.get('imported')} content items")
+            return True
+        except json.JSONDecodeError:
+            self.log_test("Bulk Import Content", False, error_msg="Invalid JSON response")
+            return False
+
+    def test_portal_content_approval(self):
+        """Test PUT /api/portal/:slug/content/:id/approval - Client approval endpoint"""
+        if not hasattr(self, 'created_content_id') or not self.created_content_id:
+            self.log_test("Portal Content Approval", False, error_msg="No created content ID available")
+            return False
+            
+        approval_data = {
+            "topic_approval_status": "Approved",
+            "blog_approval_status": "Changes Required"
+        }
+        
+        response, error = self.make_request("PUT", f"/portal/bandolier/content/{self.created_content_id}/approval", 
+                                          approval_data)
+        if error:
+            self.log_test("Portal Content Approval", False, error_msg=error)
+            return False
+            
+        if response.status_code != 200:
+            self.log_test("Portal Content Approval", False, 
+                         error_msg=f"Status {response.status_code}: {response.text}")
+            return False
+            
+        try:
+            result = response.json()
+            if not result.get("success"):
+                self.log_test("Portal Content Approval", False, error_msg="Success flag not true")
+                return False
+                
+            if result.get("topic_approval_status") != "Approved":
+                self.log_test("Portal Content Approval", False, 
+                             error_msg="topic_approval_status not updated in response")
+                return False
+                
+            self.log_test("Portal Content Approval", True, 
+                         "Client successfully updated content approval status via portal")
+            return True
+        except json.JSONDecodeError:
+            self.log_test("Portal Content Approval", False, error_msg="Invalid JSON response")
+            return False
+
+    def test_delete_content_item(self):
+        """Test DELETE /api/content/:id - Delete content item"""
+        if not self.auth_token:
+            self.log_test("Delete Content Item", False, error_msg="No auth token available")
+            return False
+            
+        if not hasattr(self, 'created_content_id') or not self.created_content_id:
+            self.log_test("Delete Content Item", False, error_msg="No created content ID available")
+            return False
+            
+        response, error = self.make_request("DELETE", f"/content/{self.created_content_id}")
+        if error:
+            self.log_test("Delete Content Item", False, error_msg=error)
+            return False
+            
+        if response.status_code != 200:
+            self.log_test("Delete Content Item", False, 
+                         error_msg=f"Status {response.status_code}: {response.text}")
+            return False
+            
+        try:
+            result = response.json()
+            if "Content item deleted" not in result.get("message", ""):
+                self.log_test("Delete Content Item", False, 
+                             error_msg=f"Unexpected response: {result}")
+                return False
+                
+            self.log_test("Delete Content Item", True, "Content item deleted successfully")
+            return True
+        except json.JSONDecodeError:
+            self.log_test("Delete Content Item", False, error_msg="Invalid JSON response")
+            return False
+
     def run_all_tests(self):
         """Run all backend tests in sequence"""
         print("🚀 Starting Agency Dashboard Backend API Tests")
