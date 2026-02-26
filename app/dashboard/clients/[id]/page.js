@@ -186,11 +186,14 @@ export default function ClientDetailPage() {
   const [client, setClient]       = useState(null)
   const [tasks, setTasks]         = useState([])
   const [reports, setReports]     = useState([])
+  const [content, setContent]     = useState([])
   const [members, setMembers]     = useState([])
   const [loading, setLoading]     = useState(true)
   const [saving, setSaving]       = useState({})
   const [newTask, setNewTask]     = useState({ title: '' })
+  const [newContent, setNewContent] = useState({ blog_title: '' })
   const [addingTask, setAddingTask] = useState(false)
+  const [addingContent, setAddingContent] = useState(false)
   const [showAddReport, setShowAddReport] = useState(false)
   const [reportForm, setReportForm] = useState({ title: '', report_type: 'Monthly SEO Report', report_url: '', report_date: '', notes: '' })
   const [showSettings, setShowSettings] = useState(false)
@@ -198,18 +201,20 @@ export default function ClientDetailPage() {
   const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || ''
 
   const loadData = async () => {
-    const [cr, tr, rr, mr] = await Promise.all([
+    const [cr, tr, rr, mr, contr] = await Promise.all([
       apiFetch(`/api/clients/${id}`),
       apiFetch(`/api/tasks?client_id=${id}`),
       apiFetch(`/api/reports?client_id=${id}`),
       apiFetch('/api/team'),
+      apiFetch(`/api/content?client_id=${id}`),
     ])
-    const [cd, td, rd, md] = await Promise.all([cr.json(), tr.json(), rr.json(), mr.json()])
+    const [cd, td, rd, md, contd] = await Promise.all([cr.json(), tr.json(), rr.json(), mr.json(), contr.json()])
     setClient(cd)
     setSettingsForm(cd)
     setTasks(Array.isArray(td) ? td : [])
     setReports(Array.isArray(rd) ? rd : [])
     setMembers(Array.isArray(md) ? md : [])
+    setContent(Array.isArray(contd) ? contd : [])
     setLoading(false)
   }
 
