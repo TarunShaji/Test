@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import { parse, isValid, format } from 'date-fns'
 import useSWR from 'swr'
 import { apiFetch, swrFetcher } from '@/lib/auth'
+import { safeArray } from '@/lib/safe'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -58,16 +59,16 @@ function flexibleParseDate(str) {
 
 function parseCSV(text) {
   if (!text || !text.trim()) return null
-  const lines = text.split(/\r?\n/).filter(l => l.trim())
+  const lines = safeArray(text.split(/\r?\n/).filter(l => l.trim()))
   if (lines.length < 2) return null
   const sep = text.includes('\t') ? '\t' : ','
   // Clean headers: lower, no quotes, no extra spaces
-  const headers = lines[0].split(sep).map(h => h.trim().replace(/^["']|["']$/g, '').toLowerCase())
+  const headers = safeArray(lines[0]?.split(sep)).map(h => h.trim().replace(/^["']|["']$/g, '').toLowerCase())
   if (headers.length === 0) return null
 
-  const rows = lines.slice(1).map(line => {
-    const vals = line.split(sep).map(v => v.trim().replace(/^["']|["']$/g, ''))
-    return Object.fromEntries(headers.map((h, i) => [h, vals[i] || '']))
+  const rows = safeArray(lines.slice(1)).map(line => {
+    const vals = safeArray(line?.split(sep)).map(v => v.trim().replace(/^["']|["']$/g, ''))
+    return Object.fromEntries(safeArray(headers).map((h, i) => [h, vals[i] || '']))
   }).filter(r => Object.values(r).some(v => v))
   return { headers, rows }
 }
@@ -165,7 +166,7 @@ function CSVImport({ clients }) {
     setResult(null)
 
     // 1. Prepare tasks
-    const tasks = parsed.rows.map(row => rowToTask(row, parsed.headers, selectedClient))
+    const tasks = safeArray(parsed?.rows).map(row => rowToTask(row, parsed.headers, selectedClient))
 
     // 2. Pre-filter locally for robustness
     const validTasks = tasks.filter(t => t.title && t.title.trim())
@@ -235,7 +236,7 @@ function CSVImport({ clients }) {
               <SelectTrigger className="mt-1"><SelectValue placeholder="Select client" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="__none__">Select a client…</SelectItem>
-                {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                {safeArray(clients).map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -278,11 +279,11 @@ function CSVImport({ clients }) {
           <CardContent className="p-0">
             <div className="overflow-auto max-h-72">
               <table className="w-full text-xs">
-                <thead><tr className="bg-gray-50 border-b">{parsed.headers.map(h => <th key={h} className="px-3 py-2 text-left font-semibold text-gray-600 capitalize">{h}</th>)}</tr></thead>
+                <thead><tr className="bg-gray-50 border-b">{safeArray(parsed?.headers).map(h => <th key={h} className="px-3 py-2 text-left font-semibold text-gray-600 capitalize">{h}</th>)}</tr></thead>
                 <tbody className="divide-y divide-gray-50">
-                  {parsed.rows.slice(0, 10).map((row, i) => (
+                  {safeArray(parsed?.rows?.slice(0, 10)).map((row, i) => (
                     <tr key={i} className="hover:bg-gray-50">
-                      {parsed.headers.map(h => <td key={h} className="px-3 py-1.5 text-gray-700 max-w-[100px] truncate">{row[h]}</td>)}
+                      {safeArray(parsed?.headers).map(h => <td key={h} className="px-3 py-1.5 text-gray-700 max-w-[100px] truncate">{row[h]}</td>)}
                     </tr>
                   ))}
                 </tbody>
@@ -432,7 +433,7 @@ function ClickUpImport({ clients, members }) {
               <SelectTrigger><SelectValue placeholder="Choose workspace" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="__none__">Choose workspace…</SelectItem>
-                {workspaces.map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}
+                {safeArray(workspaces).map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}
               </SelectContent>
             </Select>
 
@@ -442,7 +443,7 @@ function ClickUpImport({ clients, members }) {
               <div>
                 <p className="text-xs font-medium text-gray-600 mb-2">Select lists to import ({selectedLists.length} selected):</p>
                 <div className="space-y-1 max-h-48 overflow-y-auto">
-                  {lists.map(l => (
+                  {safeArray(lists).map(l => (
                     <label key={l.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-50 cursor-pointer">
                       <input
                         type="checkbox"
@@ -450,8 +451,8 @@ function ClickUpImport({ clients, members }) {
                         onChange={() => toggleList(l.id)}
                         className="rounded"
                       />
-                      <span className="text-sm text-gray-700">{l.name}</span>
-                      <span className="text-xs text-gray-400 ml-auto">{l.space_name}</span>
+                      <span className="text-sm text-gray-700">{l?.name}</span>
+                      <span className="text-xs text-gray-400 ml-auto">{l?.space_name}</span>
                     </label>
                   ))}
                 </div>
@@ -469,7 +470,7 @@ function ClickUpImport({ clients, members }) {
               <SelectTrigger><SelectValue placeholder="Select client" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="__none__">Select client…</SelectItem>
-                {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                {safeArray(clients).map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
               </SelectContent>
             </Select>
           </CardContent>
@@ -489,7 +490,7 @@ function ClickUpImport({ clients, members }) {
             </Button>
             {importLog.length > 0 && (
               <div className="bg-gray-900 rounded p-3 text-xs text-green-400 font-mono space-y-1 max-h-24 overflow-y-auto">
-                {importLog.map((l, i) => <div key={i}>{l}</div>)}
+                {safeArray(importLog).map((l, i) => <div key={i}>{l}</div>)}
               </div>
             )}
           </CardContent>

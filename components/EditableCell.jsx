@@ -49,41 +49,41 @@ export function EditableCell({ value, type = 'text', options = [], onSave, place
 
     const display = () => {
         if (type === 'status') return (
-            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${statusColors[val] || 'bg-gray-100 text-gray-600 border-gray-200'}`}>
+            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border whitespace-nowrap ${statusColors[val] || 'bg-gray-100 text-gray-600 border-gray-200'}`}>
                 {val || <span className="text-gray-300">—</span>}
             </span>
         )
         if (type === 'priority') return (
-            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-semibold ${priorityColors[val] || 'bg-gray-100 text-gray-600'}`}>
+            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold border ${priorityColors[val] || 'bg-gray-100 text-gray-600 border-gray-200'}`}>
                 {val || <span className="text-gray-300">—</span>}
             </span>
         )
         if (type === 'approval' || type === 'blog_approval') return (
-            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${approvalColors[val] || 'bg-gray-100 text-gray-500 border-gray-200'}`}>
+            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border whitespace-nowrap ${approvalColors[val] || 'bg-gray-100 text-gray-500 border-gray-200'}`}>
                 {val === null ? 'Pending Review' : (val || 'Pending Review')}
             </span>
         )
         if (type === 'internal_approval') return (
-            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${val === 'Approved' ? 'bg-green-100 text-green-700 border-green-200' : 'bg-gray-100 text-gray-500 border-gray-200'}`}>
+            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border whitespace-nowrap ${val === 'Approved' ? 'bg-green-100 text-green-700 border-green-200' : 'bg-gray-100 text-gray-500 border-gray-200'}`}>
                 {val || 'Pending'}
             </span>
         )
         if (type === 'topic_approval') return (
-            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${topicApprovalColors[val] || 'bg-gray-100 text-gray-500 border-gray-200'}`}>
+            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border whitespace-nowrap ${topicApprovalColors[val] || 'bg-gray-100 text-gray-500 border-gray-200'}`}>
                 {val || 'Pending'}
             </span>
         )
         if (type === 'blog_status') return (
-            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${blogStatusColors[val] || 'bg-gray-100 text-gray-600 border-gray-200'}`}>
+            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border whitespace-nowrap ${blogStatusColors[val] || 'bg-gray-100 text-gray-600 border-gray-200'}`}>
                 {val || 'Draft'}
             </span>
         )
-        return <span className={`text-xs ${disabled ? 'text-gray-400' : 'text-gray-700'}`}>{val || <span className="text-gray-300">—</span>}</span>
+        return <span className={`text-xs truncate block ${disabled ? 'text-gray-400' : 'text-gray-700'}`} title={val}>{val || <span className="text-gray-300">—</span>}</span>
     }
 
     return (
         <div onClick={() => !disabled && setEditing(true)}
-            className={`rounded px-1 py-0.5 min-h-[24px] min-w-[60px] transition-all ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-blue-50 hover:ring-1 hover:ring-blue-200'}`}
+            className={`rounded px-1 py-0.5 min-h-[24px] w-full transition-all overflow-hidden ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-blue-50 hover:ring-1 hover:ring-blue-200'}`}
             title={disabled ? 'Disabled' : 'Click to edit'}>
             {display()}
         </div>

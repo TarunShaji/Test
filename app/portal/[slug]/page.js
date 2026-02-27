@@ -8,11 +8,13 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ExternalLink, BarChart3, CheckCircle2, Loader2, Lock, ChevronDown, ChevronRight, Link2, FileText, Library, Folder, Image } from 'lucide-react'
+import { safeURL, safeJSON, safeArray } from '@/lib/safe'
+import { normalizeUrl } from '@/lib/utils'
 
 import useSWR, { mutate } from 'swr'
 import {
   statusColors, approvalColors, topicApprovalColors, blogStatusColors,
-  APPROVALS, TOPIC_APPROVALS, BLOG_APPROVALS
+  APPROVALS, TOPIC_APPROVALS, BLOG_APPROVALS, TASK_COLUMN_WIDTHS
 } from '@/lib/constants'
 
 const typeColors = {
@@ -236,11 +238,11 @@ export default function ClientPortalPage() {
     { shouldRetryOnError: false, revalidateOnFocus: false }
   )
 
-  const tasks = data?.tasks || []
-  const content = data?.content || []
+  const tasks = safeArray(data?.tasks)
+  const content = safeArray(data?.content)
   const client = data?.client
-  const reports = data?.reports || []
-  const resources = data?.resources || []
+  const reports = safeArray(data?.reports)
+  const resources = safeArray(data?.resources)
 
   const loading = isValidating && !data
   const needsPassword = swrErr?.status === 401 && swrErr?.info?.has_password
@@ -263,9 +265,9 @@ export default function ClientPortalPage() {
     mutate(['/api/portal', slug, portalPassword], (current) => {
       if (!current) return current
       if (type === 'task') {
-        return { ...current, tasks: current.tasks.map(t => t.id === id ? { ...t, [field]: val } : t) }
+        return { ...current, tasks: safeArray(current.tasks).map(t => t?.id === id ? { ...t, [field]: val } : t) }
       } else {
-        return { ...current, content: current.content.map(c => c.id === id ? { ...c, [field]: val } : c) }
+        return { ...current, content: safeArray(current.content).map(c => c?.id === id ? { ...c, [field]: val } : c) }
       }
     }, false)
   }
@@ -317,21 +319,21 @@ export default function ClientPortalPage() {
   if (!data) return null
 
   // data is already destructured into client and reports above
-  const completed = tasks.filter(t => t.status === 'Completed').length
+  const completed = safeArray(tasks).filter(t => t?.status === 'Completed').length
   const progress = tasks.length > 0 ? Math.round((completed / tasks.length) * 100) : 0
-  const approved = tasks.filter(t => t.client_approval === 'Approved').length
-  const changes = tasks.filter(t => t.client_approval === 'Required Changes').length
-  const pending = tasks.filter(t => !t.client_approval || t.client_approval === 'Pending Review').length
+  const approved = safeArray(tasks).filter(t => t?.client_approval === 'Approved').length
+  const changes = safeArray(tasks).filter(t => t?.client_approval === 'Required Changes').length
+  const pending = safeArray(tasks).filter(t => !t?.client_approval || t?.client_approval === 'Pending Review').length
 
-  const byCategory = tasks.reduce((acc, task) => {
-    const cat = task.category || 'Other'
+  const byCategory = safeArray(tasks).reduce((acc, task) => {
+    const cat = task?.category || 'Other'
     if (!acc[cat]) acc[cat] = []
     acc[cat].push(task)
     return acc
   }, {})
 
-  const lastUpdated = tasks.length > 0
-    ? new Date(Math.max(...tasks.map(t => new Date(t.updated_at || t.created_at)))).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  const lastUpdated = safeArray(tasks).length > 0
+    ? new Date(Math.max(...safeArray(tasks).map(t => new Date(t?.updated_at || t?.created_at)))).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
     : null
 
   return (
@@ -341,14 +343,14 @@ export default function ClientPortalPage() {
         <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 bg-blue-600 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-sm">{client.name.charAt(0)}</span>
+              <span className="text-white font-bold text-sm">{client?.name?.charAt(0)}</span>
             </div>
             <div>
-              <h1 className="font-bold text-gray-900">{client.name}</h1>
-              <p className="text-xs text-gray-400">{client.service_type} · CubeHQ</p>
+              <h1 className="font-bold text-gray-900">{client?.name}</h1>
+              <p className="text-xs text-gray-400">{client?.service_type} · CubeHQ</p>
             </div>
           </div>
-          <span className="inline-flex items-center px-2.5 py-1 bg-blue-50 text-blue-700 rounded-full text-xs font-medium">{client.service_type}</span>
+          <span className="inline-flex items-center px-2.5 py-1 bg-blue-50 text-blue-700 rounded-full text-xs font-medium">{client?.service_type}</span>
         </div>
       </header>
 
@@ -422,62 +424,64 @@ export default function ClientPortalPage() {
                       <div className="flex items-center gap-2.5">
                         {collapsed[category] ? <ChevronRight className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
                         <span className="font-semibold text-gray-800 text-sm">{category}</span>
-                        <span className="text-xs text-gray-400">({catTasks.length})</span>
+                        <span className="text-xs text-gray-400">({safeArray(catTasks).length})</span>
                       </div>
-                      <span className="text-xs text-gray-400">{catTasks.filter(t => t.status === 'Completed').length}/{catTasks.length} done</span>
+                      <span className="text-xs text-gray-400">{safeArray(catTasks).filter(t => t?.status === 'Completed').length}/{safeArray(catTasks).length} done</span>
                     </button>
 
                     {!collapsed[category] && (
-                      <table className="w-full text-sm border-t border-gray-100">
-                        <thead>
-                          <tr className="bg-gray-50">
-                            <th className="text-left px-5 py-2 text-xs font-semibold text-gray-500">Task</th>
-                            <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500">Status</th>
-                            <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500">ETA End</th>
-                            <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500">Notes</th>
-                            <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500">Link</th>
-                            <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500">Your Approval</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-50">
-                          {catTasks.map(task => (
-                            <tr key={task.id} className="hover:bg-gray-50 transition-colors border-b border-gray-50 last:border-0">
-                              <td className="px-5 py-4 font-medium text-gray-800 text-sm">{task.title}</td>
-                              <td className="px-4 py-4">
-                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${statusColors[task.status] || 'bg-gray-100 text-gray-600 border-gray-200'}`}>
-                                  {task.status}
-                                </span>
-                              </td>
-                              <td className="px-4 py-4 text-xs text-gray-500">{task.eta_end || '—'}</td>
-                              <td className="px-4 py-4 text-xs text-gray-500 max-w-[160px] italic">
-                                {task.client_approval === 'Required Changes' ? task.client_feedback_note : (task.remarks || '—')}
-                              </td>
-                              <td className="px-4 py-4 text-center">
-                                {task.client_link_visible && task.link_url ? (
-                                  <a href={task.link_url} target="_blank" rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white text-xs font-bold transition-all shadow-sm">
-                                    <Link2 className="w-3.5 h-3.5" /> View
-                                  </a>
-                                ) : (
-                                  <div className="inline-flex items-center gap-1.5 text-gray-300 text-[10px] font-bold uppercase tracking-widest">
-                                    <Lock className="w-3 h-3" /> Pending Review
-                                  </div>
-                                )}
-                              </td>
-                              <td className="px-4 py-4">
-                                <ApprovalButton
-                                  taskId={task.id}
-                                  current={task.client_approval}
-                                  slug={slug}
-                                  portalPassword={portalPassword}
-                                  disabled={!task.client_link_visible}
-                                  onUpdate={handleApprovalUpdate}
-                                />
-                              </td>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm border-t border-gray-100" style={{ tableLayout: 'fixed', minWidth: '1000px' }}>
+                          <thead>
+                            <tr className="bg-gray-50">
+                              <th className="text-left px-5 py-2 text-xs font-semibold text-gray-500" style={{ width: TASK_COLUMN_WIDTHS.title }}>Task</th>
+                              <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500" style={{ width: TASK_COLUMN_WIDTHS.status }}>Status</th>
+                              <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500" style={{ width: TASK_COLUMN_WIDTHS.eta }}>ETA End</th>
+                              <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500" style={{ width: TASK_COLUMN_WIDTHS.client_feedback || '200px' }}>Notes</th>
+                              <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500" style={{ width: TASK_COLUMN_WIDTHS.link }}>Link</th>
+                              <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500" style={{ width: TASK_COLUMN_WIDTHS.client_approval }}>Your Approval</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody className="divide-y divide-gray-50">
+                            {safeArray(catTasks).map(task => (
+                              <tr key={task?.id} className="hover:bg-gray-50 transition-colors border-b border-gray-50 last:border-0">
+                                <td className="px-5 py-4 font-medium text-gray-800 text-sm truncate" title={task?.title}>{task?.title}</td>
+                                <td className="px-4 py-4 overflow-hidden">
+                                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border whitespace-nowrap ${statusColors[task?.status] || 'bg-gray-100 text-gray-600 border-gray-200'}`}>
+                                    {task?.status}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-4 text-xs text-gray-500 truncate">{task?.eta_end || '—'}</td>
+                                <td className="px-4 py-4 text-xs text-gray-500 truncate" title={task?.client_approval === 'Required Changes' ? task?.client_feedback_note : (task?.remarks || '')}>
+                                  {task?.client_approval === 'Required Changes' ? task?.client_feedback_note : (task?.remarks || '—')}
+                                </td>
+                                <td className="px-4 py-4 text-center overflow-hidden">
+                                  {task?.client_link_visible && task?.link_url ? (
+                                    <a href={normalizeUrl(task.link_url)} target="_blank" rel="noopener noreferrer"
+                                      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white text-xs font-bold transition-all shadow-sm whitespace-nowrap">
+                                      <Link2 className="w-3.5 h-3.5" /> View
+                                    </a>
+                                  ) : (
+                                    <div className="inline-flex items-center gap-1.5 text-gray-300 text-[10px] font-bold uppercase tracking-widest whitespace-nowrap">
+                                      <Lock className="w-3 h-3" /> Pending Review
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="px-4 py-4">
+                                  <ApprovalButton
+                                    taskId={task?.id}
+                                    current={task?.client_approval}
+                                    slug={slug}
+                                    portalPassword={portalPassword}
+                                    disabled={!task?.client_link_visible}
+                                    onUpdate={handleApprovalUpdate}
+                                  />
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     )}
                   </div>
                 ))}
@@ -507,22 +511,22 @@ export default function ClientPortalPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
-                    {content.map(item => (
-                      <tr key={item.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 text-sm text-gray-600">{item.week || '—'}</td>
+                    {safeArray(content).map(item => (
+                      <tr key={item?.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 text-sm text-gray-600">{item?.week || '—'}</td>
                         <td className="px-4 py-3">
-                          <p className="font-medium text-gray-800 text-sm">{item.blog_title}</p>
-                          {item.blog_type && <p className="text-xs text-gray-400 mt-0.5 line-clamp-1">{item.blog_type}</p>}
+                          <p className="font-medium text-gray-800 text-sm">{item?.blog_title}</p>
+                          {item?.blog_type && <p className="text-xs text-gray-400 mt-0.5 line-clamp-1">{item?.blog_type}</p>}
                         </td>
-                        <td className="px-4 py-3 text-sm text-gray-600">{item.primary_keyword || '—'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-600">{item?.primary_keyword || '—'}</td>
                         <td className="px-4 py-3">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${blogStatusColors[item.blog_status] || 'bg-gray-100 text-gray-600 border-gray-200'}`}>
-                            {item.blog_status || 'Draft'}
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${blogStatusColors[item?.blog_status] || 'bg-gray-100 text-gray-600 border-gray-200'}`}>
+                            {item?.blog_status || 'Draft'}
                           </span>
                         </td>
                         <td className="px-4 py-3">
-                          {item.blog_link ? (
-                            <a href={item.blog_link} target="_blank" rel="noopener noreferrer"
+                          {item?.blog_link ? (
+                            <a href={normalizeUrl(item.blog_link)} target="_blank" rel="noopener noreferrer"
                               className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 text-xs font-medium transition-colors">
                               <Link2 className="w-3 h-3" /> View
                             </a>
@@ -530,8 +534,8 @@ export default function ClientPortalPage() {
                         </td>
                         <td className="px-4 py-3">
                           <TopicApprovalButton
-                            contentId={item.id}
-                            current={item.topic_approval_status}
+                            contentId={item?.id}
+                            current={item?.topic_approval_status}
                             slug={slug}
                             portalPassword={portalPassword}
                             onUpdate={handleContentApprovalUpdate}
@@ -539,8 +543,8 @@ export default function ClientPortalPage() {
                         </td>
                         <td className="px-4 py-3">
                           <BlogApprovalButton
-                            contentId={item.id}
-                            current={item.blog_approval_status}
+                            contentId={item?.id}
+                            current={item?.blog_approval_status}
                             slug={slug}
                             portalPassword={portalPassword}
                             onUpdate={handleContentApprovalUpdate}
@@ -581,25 +585,22 @@ export default function ClientPortalPage() {
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {resources.map(res => (
-                  <Card key={res.id} className="border border-gray-200 hover:shadow-md transition-all">
+                {safeArray(resources).map(res => (
+                  <Card key={res?.id} className="border border-gray-200 hover:shadow-md transition-all">
                     <CardContent className="p-5">
                       <div className="flex items-start gap-4">
                         <div className="w-12 h-12 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600 flex-shrink-0">
-                          {res.type === 'image' ? <Image className="w-6 h-6" /> :
-                            res.type === 'folder' ? <Folder className="w-6 h-6" /> :
+                          {res?.type === 'image' ? <Image className="w-6 h-6" /> :
+                            res?.type === 'folder' ? <Folder className="w-6 h-6" /> :
                               <Link2 className="w-6 h-6" />}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <span className="text-[10px] uppercase tracking-widest font-bold text-gray-400 block mb-1">{res.category || 'Asset'}</span>
-                          <h3 className="font-bold text-gray-900 truncate">{res.name}</h3>
+                          <span className="text-[10px] uppercase tracking-widest font-bold text-gray-400 block mb-1">{res?.category || 'Asset'}</span>
+                          <h3 className="font-bold text-gray-900 truncate">{res?.name}</h3>
                           <p className="text-xs text-gray-400 truncate mt-0.5">
-                            {(() => {
-                              try { return new URL(res.url).hostname }
-                              catch { return 'resource' }
-                            })()}
+                            {safeURL(res?.url)?.hostname || 'resource'}
                           </p>
-                          <a href={res.url} target="_blank" rel="noopener noreferrer"
+                          <a href={normalizeUrl(res?.url)} target="_blank" rel="noopener noreferrer"
                             className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors w-full justify-center shadow-sm">
                             View Resource <ExternalLink className="w-3.5 h-3.5" />
                           </a>
@@ -630,7 +631,7 @@ export default function ClientPortalPage() {
                       <h3 className="font-semibold text-gray-900">{report.title}</h3>
                       <p className="text-sm text-gray-400 mt-0.5">{report.report_date}</p>
                       {report.notes && <p className="text-sm text-gray-500 mt-2">{report.notes}</p>}
-                      <a href={report.report_url} target="_blank" rel="noopener noreferrer"
+                      <a href={normalizeUrl(report.report_url)} target="_blank" rel="noopener noreferrer"
                         className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
                         View Report <ExternalLink className="w-3.5 h-3.5" />
                       </a>

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { apiFetch } from '@/lib/auth'
+import { safeArray } from '@/lib/safe'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -87,27 +88,27 @@ export default function TeamPage() {
 
       {tab === 'members' && (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          {loading ? <p className="text-gray-400 col-span-4">Loading...</p> : members.map(m => {
-            const memberTasks = tasks.filter(t => t.assigned_to === m.id)
+          {loading ? <p className="text-gray-400 col-span-4">Loading...</p> : safeArray(members).map(m => {
+            const memberTasks = safeArray(tasks).filter(t => t.assigned_to === m.id)
             const active = memberTasks.filter(t => t.status === 'In Progress').length
             return (
               <Card key={m.id} className="border border-gray-200 hover:shadow-md transition-shadow">
                 <CardContent className="p-4">
                   <div className="flex items-start justify-between">
                     <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                      <span className="text-blue-700 font-bold text-base">{m.name.charAt(0).toUpperCase()}</span>
+                      <span className="text-blue-700 font-bold text-base">{m?.name?.charAt(0)?.toUpperCase()}</span>
                     </div>
                     <button onClick={() => deactivate(m.id)} className="p-1 rounded hover:bg-red-50 text-gray-200 hover:text-red-400 transition-all">
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
                   <div className="mt-3">
-                    <p className="font-semibold text-gray-900">{m.name}</p>
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium mt-1 ${roleColors[m.role] || 'bg-gray-100 text-gray-600'}`}>{m.role}</span>
+                    <p className="font-semibold text-gray-900">{m?.name}</p>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium mt-1 ${roleColors[m?.role] || 'bg-gray-100 text-gray-600'}`}>{m?.role}</span>
                   </div>
                   <div className="flex items-center gap-1 mt-2 text-xs text-gray-400">
                     <Mail className="w-3 h-3" />
-                    <span className="truncate">{m.email}</span>
+                    <span className="truncate">{m?.email}</span>
                   </div>
                   <div className="flex gap-3 mt-3 pt-3 border-t border-gray-100 text-xs text-gray-500">
                     <span><b className="text-gray-800">{memberTasks.length}</b> tasks</span>
@@ -128,12 +129,12 @@ export default function TeamPage() {
               onClick={() => setSelectedMember('')}
               className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${!selectedMember ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`}
             >All Members</button>
-            {members.map(m => (
+            {safeArray(members).map(m => (
               <button
                 key={m.id}
                 onClick={() => setSelectedMember(selectedMember === m.id ? '' : m.id)}
                 className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${selectedMember === m.id ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`}
-              >{m.name}</button>
+              >{m?.name}</button>
             ))}
           </div>
 
@@ -147,14 +148,14 @@ export default function TeamPage() {
                   </div>
                   <table className="w-full text-xs">
                     <tbody className="divide-y divide-gray-50">
-                      {clientTasks.map(task => (
+                      {safeArray(clientTasks).map(task => (
                         <tr key={task.id} className="hover:bg-gray-50">
-                          <td className="px-4 py-2 font-medium text-gray-800">{task.title}</td>
-                          <td className="px-4 py-2 text-gray-400">{task.category}</td>
+                          <td className="px-4 py-2 font-medium text-gray-800">{task?.title}</td>
+                          <td className="px-4 py-2 text-gray-400">{task?.category}</td>
                           <td className="px-4 py-2">
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusColors[task.status] || 'bg-gray-100 text-gray-600'}`}>{task.status}</span>
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusColors[task?.status] || 'bg-gray-100 text-gray-600'}`}>{task?.status}</span>
                           </td>
-                          <td className="px-4 py-2 text-gray-400">{task.eta_end || '—'}</td>
+                          <td className="px-4 py-2 text-gray-400">{task?.eta_end || '—'}</td>
                         </tr>
                       ))}
                     </tbody>

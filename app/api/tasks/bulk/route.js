@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid'
 import crypto from 'crypto'
 import { connectToMongo } from '@/lib/mongodb'
 import { handleCORS, withAuth, withErrorLogging } from '@/lib/api-utils'
+import { applyTaskTransition, assertTaskInvariant } from '@/lib/lifecycleEngine'
 
 export async function POST(request) {
     return withAuth(request, async () => {
@@ -15,10 +16,10 @@ export async function POST(request) {
                 return handleCORS(NextResponse.json({ error: 'Array of tasks required' }, { status: 400 }))
             }
 
-            const now = new Date()
-            const operations = []
+            const preparedDocs = []
             const errors = []
 
+            // 1. Prepare Batch in Memory (Single Authority Engine)
             for (let i = 0; i < tasks.length; i++) {
                 const t = tasks[i]
                 const title = t.title?.trim()
@@ -29,58 +30,70 @@ export async function POST(request) {
                     continue
                 }
 
-                // Generate a unique signature for idempotency
-                const signatureSource = `${cid}|${title}|${t.eta_end || ''}`
-                const signature = crypto.createHash('sha256').update(signatureSource).digest('hex')
-
-                const taskDoc = {
-                    id: t.id || uuidv4(),
-                    client_id: cid,
-                    title: title,
-                    description: t.description || null,
-                    category: t.category || 'Other',
-                    status: t.status || 'To Be Started',
-                    priority: t.priority || 'P2',
-                    assigned_to: t.assigned_to || null,
-                    duration_days: t.duration_days || null,
-                    eta_start: t.eta_start || null,
-                    eta_end: t.eta_end || null,
-                    remarks: t.remarks || null,
-                    link_url: t.link_url || null,
-                    signature: signature,
-                    // Hardened Lifecycle Defaults
-                    internal_approval: 'Pending',
-                    client_link_visible: false,
-                    client_approval: null,
-                    client_feedback_note: null,
-                    client_feedback_at: null,
-                    created_at: now,
-                    updated_at: now
-                }
-
-                operations.push({
-                    updateOne: {
-                        filter: { signature: signature },
-                        update: { $setOnInsert: taskDoc },
-                        upsert: true
+                try {
+                    // Create base Doc
+                    const baseDoc = {
+                        id: t.id || uuidv4(),
+                        client_id: cid,
+                        title: title,
+                        description: t.description || null,
+                        category: t.category || 'Other',
+                        priority: t.priority || 'P2',
+                        assigned_to: t.assigned_to || null,
+                        duration_days: t.duration_days || null,
+                        eta_start: t.eta_start || null,
+                        eta_end: t.eta_end || null,
+                        remarks: t.remarks || null,
+                        link_url: t.link_url || null,
+                        // Expose intent to engine (which will validate/reject)
+                        status: t.status || undefined,
+                        internal_approval: t.internal_approval || undefined,
+                        client_approval: t.client_approval || undefined,
                     }
-                })
+
+                    // Use engine to compute initial lifecycle state + defaults
+                    const finalDoc = applyTaskTransition(null, baseDoc);
+
+                    // Add unique signature for idempotency
+                    const signatureSource = `${cid}|${title}|${t.eta_end || ''}`
+                    finalDoc.signature = crypto.createHash('sha256').update(signatureSource).digest('hex')
+
+                    preparedDocs.push(finalDoc)
+                } catch (err) {
+                    errors.push({ index: i, error: `Lifecycle violation: ${err.message}` })
+                }
             }
 
-            if (operations.length === 0) {
+            if (preparedDocs.length === 0) {
                 return handleCORS(NextResponse.json({
                     error: 'No valid tasks found in request',
                     details: errors
                 }, { status: 400 }))
             }
 
-            const result = await database.collection('tasks').bulkWrite(operations)
+            // 2. Multi-point Verification: Assert invariants for the entire batch before writing
+            try {
+                preparedDocs.forEach(doc => assertTaskInvariant(doc));
+            } catch (criticalError) {
+                return handleCORS(NextResponse.json({ error: `Batch Invariant Violation: ${criticalError.message}` }, { status: 400 }))
+            }
+
+            // 3. Atomic Bulk Write (Upsert based on signature)
+            const operations = preparedDocs.map(doc => ({
+                updateOne: {
+                    filter: { signature: doc.signature },
+                    update: { $setOnInsert: doc },
+                    upsert: true
+                }
+            }))
+
+            const bulkResult = await database.collection('tasks').bulkWrite(operations)
 
             return handleCORS(NextResponse.json({
-                message: `Processed ${operations.length} tasks. New: ${result.upsertedCount}, Skipped: ${operations.length - result.upsertedCount}`,
+                message: `Processed ${operations.length} tasks. New: ${bulkResult.upsertedCount}, Skipped: ${operations.length - bulkResult.upsertedCount}`,
                 count: operations.length,
-                inserted: result.upsertedCount,
-                skipped: operations.length - result.upsertedCount,
+                inserted: bulkResult.upsertedCount,
+                skipped: operations.length - bulkResult.upsertedCount,
                 failed: errors.length,
                 errors: errors
             }))

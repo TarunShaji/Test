@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server'
 import { v4 as uuidv4 } from 'uuid'
 import { connectToMongo } from '@/lib/mongodb'
 import { handleCORS, withAuth, withErrorLogging } from '@/lib/api-utils'
+import { validateBody } from '@/lib/validation'
+import { ClientSchema } from '@/lib/schemas/client.schema'
 
 export async function GET(request) {
     return withErrorLogging(request, async () => {
@@ -26,9 +28,14 @@ export async function POST(request) {
         try {
             const database = await connectToMongo()
             const body = await request.json()
-            const { name, service_type, portal_password } = body
 
-            if (!name) return handleCORS(NextResponse.json({ error: 'Name required' }, { status: 400 }))
+            const validation = validateBody(ClientSchema, body)
+            if (!validation.success) {
+                return handleCORS(NextResponse.json(validation.error, { status: 400 }))
+            }
+
+            const cleanData = validation.data
+            const { name, service_type, portal_password } = cleanData
 
             const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
             const existing = await database.collection('clients').findOne({ slug })

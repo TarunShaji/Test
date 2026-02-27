@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { connectToMongo } from '@/lib/mongodb'
 import { handleCORS, withErrorLogging } from '@/lib/api-utils'
+import { safeArray } from '@/lib/safe'
 
 export async function GET(request) {
     return withErrorLogging(request, async () => {
@@ -12,11 +13,11 @@ export async function GET(request) {
         const completed = await database.collection('tasks').countDocuments({ status: 'Completed' })
 
         const recentTasks = await database.collection('tasks').find({}).sort({ updated_at: -1 }).limit(20).toArray()
-        const recentTasksClean = recentTasks.map(({ _id, ...t }) => t)
+        const recentTasksClean = safeArray(recentTasks).map(({ _id, ...t }) => t)
 
         const clientIds = [...new Set(recentTasksClean.map(t => t.client_id))]
         const clients = await database.collection('clients').find({ id: { $in: clientIds } }).toArray()
-        const clientMap = Object.fromEntries(clients.map(c => [c.id, c.name]))
+        const clientMap = Object.fromEntries(safeArray(clients).map(c => [c.id, c.name]))
 
         const enrichedRecent = recentTasksClean.map(t => ({ ...t, client_name: clientMap[t.client_id] || 'Unknown' }))
 

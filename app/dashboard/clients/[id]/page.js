@@ -1,10 +1,11 @@
 'use client'
 
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useMemo } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import useSWR, { mutate } from 'swr'
 import { apiFetch, swrFetcher } from '@/lib/auth'
+import { safeURL, safeJSON, safeArray } from '@/lib/safe'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -36,7 +37,8 @@ import { restrictToHorizontalAxis, restrictToVerticalAxis } from '@dnd-kit/modif
 import {
   STATUSES, CATEGORIES, PRIORITIES, APPROVALS, INTERNAL_APPROVALS, REPORT_TYPES, SERVICE_TYPES,
   OUTLINE_STATUSES, TOPIC_APPROVALS, BLOG_APPROVALS, BLOG_STATUSES,
-  statusColors, priorityColors, approvalColors, topicApprovalColors, blogStatusColors, internalApprovalColors
+  statusColors, priorityColors, approvalColors, topicApprovalColors, blogStatusColors, internalApprovalColors,
+  TASK_COLUMN_WIDTHS, CONTENT_COLUMN_WIDTHS
 } from '@/lib/constants'
 
 // Shared components imported from @/components/
@@ -67,12 +69,20 @@ export default function ClientDetailPage() {
 
   useEffect(() => {
     const savedTasks = localStorage.getItem('client_tasks_col_order')
-    if (savedTasks) setTaskColOrder(JSON.parse(savedTasks))
-    else setTaskColOrder(['selection', 'title', 'category', 'status', 'priority', 'eta', 'assigned', 'link', 'internal_approval', 'send_link', 'client_approval', 'client_feedback', 'actions'])
+    const parsedTasks = safeJSON(savedTasks)
+    if (parsedTasks && Array.isArray(parsedTasks)) {
+      setTaskColOrder(parsedTasks.filter(c => c !== 'selection' && c !== 'client'))
+    } else {
+      setTaskColOrder(['title', 'category', 'status', 'priority', 'eta', 'assigned', 'link', 'internal_approval', 'send_link', 'client_approval', 'client_feedback', 'actions'])
+    }
 
     const savedContent = localStorage.getItem('client_content_col_order')
-    if (savedContent) setContentColOrder(JSON.parse(savedContent))
-    else setContentColOrder(['client_grip', 'week', 'title', 'keyword', 'writer', 'outline', 'topic_approval', 'blog_status', 'blog_approval', 'link', 'published', 'comments', 'actions'])
+    const parsedContent = safeJSON(savedContent)
+    if (parsedContent && Array.isArray(parsedContent)) {
+      setContentColOrder(parsedContent.filter(c => c !== 'client_grip' && c !== 'client'))
+    } else {
+      setContentColOrder(['week', 'title', 'keyword', 'writer', 'outline', 'topic_approval', 'blog_status', 'blog_approval', 'link', 'published', 'comments', 'actions'])
+    }
   }, [])
   const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || ''
 
@@ -81,7 +91,7 @@ export default function ClientDetailPage() {
   }, [client])
 
   const updateTask = async (taskId, field, value) => {
-    const task = (tasks || []).find(t => t.id === taskId)
+    const task = safeArray(tasks).find(t => t.id === taskId)
     if (!task) return
 
     setSaving(s => ({ ...s, [taskId]: true }))
@@ -149,6 +159,10 @@ export default function ClientDetailPage() {
       mutateReports()
       setShowAddReport(false)
       setReportForm({ title: '', report_type: 'Monthly SEO Report', report_url: '', report_date: '', notes: '' })
+    } else {
+      const err = await res.json().catch(() => ({}))
+      alert(err.message || 'Failed to add report. Please check the URL and fields.')
+      if (err.details) console.warn('Validation Details:', err.details)
     }
   }
 
@@ -214,16 +228,17 @@ export default function ClientDetailPage() {
     mutateContent()
   }
 
-  const allTasks = tasks || []
-  const allReports = reports || []
-  const allContent = content || []
-  const allResources = resources || []
-  const allMembers = members || []
-  const completedTasks = allTasks.filter(t => t.status === 'Completed').length
-  const progress = allTasks.length > 0 ? Math.round((completedTasks / allTasks.length) * 100) : 0
-  const memberMap = Object.fromEntries(allMembers.map(m => [m.id, m.name]))
-  const approvalCount = allTasks.filter(t => t.client_approval === 'Approved').length
-  const changesCount = allTasks.filter(t => t.client_approval === 'Required Changes').length
+  const allTasks = useMemo(() => safeArray(tasks), [tasks])
+  const allReports = useMemo(() => safeArray(reports), [reports])
+  const allContent = useMemo(() => safeArray(content), [content])
+  const allResources = useMemo(() => safeArray(resources), [resources])
+  const allMembers = useMemo(() => safeArray(members), [members])
+
+  const completedTasks = useMemo(() => allTasks.filter(t => t?.status === 'Completed').length, [allTasks])
+  const progress = useMemo(() => allTasks.length > 0 ? Math.round((completedTasks / allTasks.length) * 100) : 0, [allTasks.length, completedTasks])
+  const memberMap = useMemo(() => Object.fromEntries(allMembers.map(m => [m?.id, m?.name])), [allMembers])
+  const approvalCount = useMemo(() => allTasks.filter(t => t?.client_approval === 'Approved').length, [allTasks])
+  const changesCount = useMemo(() => allTasks.filter(t => t?.client_approval === 'Required Changes').length, [allTasks])
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -278,37 +293,45 @@ export default function ClientDetailPage() {
   if (!client || clientErr) return <div className="p-8 text-gray-400">Client not found</div>
 
   // --- Sortable Components ---
-  const SortableHeader = ({ id, label, sortField: sField, handleSort }) => {
-    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
-    const style = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 20 : 0 }
+  const SortableHeader = ({ id, label, sortField: sField, handleSort, type = 'task' }) => {
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: id || 'header' })
+    const widths = type === 'task' ? TASK_COLUMN_WIDTHS : CONTENT_COLUMN_WIDTHS
+    const style = {
+      transform: CSS.Transform.toString(transform),
+      transition,
+      zIndex: isDragging ? 20 : 0,
+      width: widths[id] || 'auto',
+      minWidth: widths[id] || 'auto'
+    }
     return (
       <th ref={setNodeRef} style={style} className={`text-left px-3 py-2.5 font-semibold text-gray-600 bg-gray-50 border-r border-gray-100 last:border-0 ${isDragging ? 'opacity-50' : ''}`}>
-        <div className="flex items-center gap-2">
-          <div {...attributes} {...listeners} className="cursor-grab hover:text-blue-500">
+        <div className="flex items-center gap-2 overflow-hidden">
+          <div {...attributes} {...listeners} className="cursor-grab hover:text-blue-500 flex-shrink-0">
             <GripHorizontal className="w-3 h-3" />
           </div>
-          <span>{label}</span>
+          <span className="truncate" title={label}>{label}</span>
         </div>
       </th>
     )
   }
 
   const TaskSortableRow = ({ task }) => {
-    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id })
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task?.id || 'unknown' })
+    if (!task?.id) return null
     const style = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 20 : 0 }
     return (
       <tr ref={setNodeRef} style={style} className={`hover:bg-gray-50 group border-b border-gray-100 ${isDragging ? 'opacity-50 shadow-lg' : ''}`}>
-        {taskColOrder.map(colId => (
-          <td key={colId} className={`px-3 py-1.5 ${colId === 'internal_approval' || colId === 'send_link' ? 'bg-gray-50/50' : ''}`}>
-            {colId === 'selection' && (
+        {safeArray(taskColOrder).map(colId => (
+          <td key={colId} className={`px-3 py-1.5 overflow-hidden ${colId === 'internal_approval' || colId === 'send_link' ? 'bg-gray-50/50' : ''}`} style={{ width: TASK_COLUMN_WIDTHS[colId], minWidth: TASK_COLUMN_WIDTHS[colId] }}>
+            {colId === 'title' && (
               <div className="flex items-center gap-2">
-                <div {...attributes} {...listeners} className="cursor-grab text-gray-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div {...attributes} {...listeners} className="cursor-grab text-gray-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
                   <GripVertical className="w-3 h-3" />
                 </div>
-                {saving[task.id] && <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse mx-auto" />}
+                {saving[task.id] && <div className="w-1 h-1 rounded-full bg-blue-400 animate-pulse flex-shrink-0" />}
+                <EditableCell value={task.title} onSave={v => updateTask(task.id, 'title', v)} />
               </div>
             )}
-            {colId === 'title' && <EditableCell value={task.title} onSave={v => updateTask(task.id, 'title', v)} />}
             {colId === 'category' && <EditableCell value={task.category} type="select" options={CATEGORIES} onSave={v => updateTask(task.id, 'category', v)} />}
             {colId === 'status' && <EditableCell value={task.status} type="status" options={STATUSES} onSave={v => updateTask(task.id, 'status', v)} />}
             {colId === 'priority' && <EditableCell value={task.priority} type="priority" options={PRIORITIES} onSave={v => updateTask(task.id, 'priority', v)} />}
@@ -372,21 +395,21 @@ export default function ClientDetailPage() {
   }
 
   const ContentSortableRow = ({ item }) => {
-    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id })
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item?.id || 'unknown' })
+    if (!item?.id) return null
     const style = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 20 : 0 }
     return (
       <tr ref={setNodeRef} style={style} className={`hover:bg-gray-50 group border-b border-gray-100 ${isDragging ? 'opacity-50 shadow-lg' : ''}`}>
-        {contentColOrder.map(colId => (
-          <td key={colId} className="px-3 py-1.5">
-            {colId === 'client_grip' && (
+        {safeArray(contentColOrder).map(colId => (
+          <td key={colId} className="px-3 py-1.5 overflow-hidden" style={{ width: CONTENT_COLUMN_WIDTHS[colId], minWidth: CONTENT_COLUMN_WIDTHS[colId] }}>
+            {colId === 'week' && (
               <div className="flex items-center gap-2">
-                <div {...attributes} {...listeners} className="cursor-grab text-gray-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div {...attributes} {...listeners} className="cursor-grab text-gray-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
                   <GripVertical className="w-3 h-3" />
                 </div>
-                {saving[`c_${item.id}`] && <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse mx-auto" />}
+                <EditableCell value={item.week} onSave={v => updateContent(item.id, 'week', v)} placeholder="W1" />
               </div>
             )}
-            {colId === 'week' && <EditableCell value={item.week} onSave={v => updateContent(item.id, 'week', v)} placeholder="Week 1" />}
             {colId === 'title' && <EditableCell value={item.blog_title} onSave={v => updateContent(item.id, 'blog_title', v)} />}
             {colId === 'keyword' && <EditableCell value={item.primary_keyword} onSave={v => updateContent(item.id, 'primary_keyword', v)} placeholder="keyword" />}
             {colId === 'writer' && <EditableCell value={item.writer} onSave={v => updateContent(item.id, 'writer', v)} placeholder="Writer" />}
@@ -439,15 +462,15 @@ export default function ClientDetailPage() {
   }
 
   const taskColLabels = {
-    selection: '', title: 'Task', category: 'Category', status: 'Status', priority: 'Priority',
+    title: 'Task', category: 'Category', status: 'Status', priority: 'Priority',
     eta: 'ETA End', assigned: 'Assigned', link: 'Link', internal_approval: 'Internal Approval',
-    send_link: 'Send Link', client_approval: 'Client Approval', client_feedback: 'Client Feedback', actions: ''
+    send_link: 'Send Link', client_approval: 'Client Approval', client_feedback: 'Feedback', actions: ''
   }
 
   const contentColLabels = {
-    client_grip: '', week: 'Week', title: 'Blog Title', keyword: 'Primary Keyword', writer: 'Writer',
+    week: 'Week', title: 'Blog Title', keyword: 'Keyword', writer: 'Writer',
     outline: 'Outline Status', topic_approval: 'Topic Approval', blog_status: 'Blog Status',
-    blog_approval: 'Blog Approval', link: 'Blog Link', published: 'Published', comments: 'Comments', actions: ''
+    blog_approval: 'Blog Approval', link: 'Blog Link', published: 'Published', comments: 'Notes', actions: ''
   }
 
   return (
@@ -458,12 +481,12 @@ export default function ClientDetailPage() {
           <div className="flex items-center gap-2 text-sm text-gray-400 mb-1">
             <Link href="/dashboard/clients" className="hover:text-gray-600">Clients</Link>
             <span>/</span>
-            <span className="text-gray-700 font-medium">{client.name}</span>
+            <span className="text-gray-700 font-medium">{client?.name}</span>
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">{client.name}</h1>
+          <h1 className="text-2xl font-bold text-gray-900">{client?.name}</h1>
           <div className="flex items-center gap-3 mt-1">
-            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">{client.service_type}</span>
-            <a href={`${BASE_URL}/portal/${client.slug}`} target="_blank" rel="noopener noreferrer"
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">{client?.service_type}</span>
+            <a href={`${BASE_URL}/portal/${client?.slug}`} target="_blank" rel="noopener noreferrer"
               className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800">
               Portal Link <ExternalLink className="w-3 h-3" />
             </a>
@@ -496,7 +519,7 @@ export default function ClientDetailPage() {
             <div className="text-xs text-gray-400 mt-0.5">Changes Req.</div>
           </div>
           <div className="text-center flex-1">
-            <div className="text-2xl font-bold text-gray-400">{allTasks.filter(t => !t.client_approval || t.client_approval === 'Pending Review').length}</div>
+            <div className="text-2xl font-bold text-gray-400">{allTasks.filter(t => !t?.client_approval || t?.client_approval === 'Pending Review').length}</div>
             <div className="text-xs text-gray-400 mt-0.5">Pending</div>
           </div>
         </div>
@@ -520,12 +543,12 @@ export default function ClientDetailPage() {
         <TabsContent value="timeline">
           <div className="bg-white border border-gray-200 rounded-lg overflow-auto shadow-sm">
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleTaskColDragEnd} modifiers={[restrictToHorizontalAxis]}>
-              <table className="w-full text-sm" style={{ minWidth: '1200px', tableLayout: 'fixed' }}>
+              <table className="w-full text-sm" style={{ minWidth: '1800px', tableLayout: 'fixed' }}>
                 <thead>
                   <SortableContext items={taskColOrder} strategy={horizontalListSortingStrategy}>
                     <tr className="border-b border-gray-100 bg-gray-50/80 sticky top-0 z-10">
-                      {taskColOrder.map(colId => (
-                        <SortableHeader key={colId} id={colId} label={taskColLabels[colId]} />
+                      {safeArray(taskColOrder).map(colId => (
+                        <SortableHeader key={colId} id={colId} label={taskColLabels[colId]} type="task" />
                       ))}
                     </tr>
                   </SortableContext>
@@ -539,8 +562,8 @@ export default function ClientDetailPage() {
                     </tr>
                   ) : (
                     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleTaskRowDragEnd} modifiers={[restrictToVerticalAxis]}>
-                      <SortableContext items={allTasks.map(t => t.id)} strategy={verticalListSortingStrategy}>
-                        {allTasks.map(task => <TaskSortableRow key={task.id} task={task} />)}
+                      <SortableContext items={allTasks.map(t => t?.id)} strategy={verticalListSortingStrategy}>
+                        {allTasks.map(task => <TaskSortableRow key={task?.id} task={task} />)}
                       </SortableContext>
                     </DndContext>
                   )}
@@ -573,12 +596,12 @@ export default function ClientDetailPage() {
         <TabsContent value="content">
           <div className="bg-white border border-gray-200 rounded-lg overflow-auto shadow-sm">
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleContentColDragEnd} modifiers={[restrictToHorizontalAxis]}>
-              <table className="w-full text-sm" style={{ minWidth: '1400px', tableLayout: 'fixed' }}>
+              <table className="w-full text-sm" style={{ minWidth: '2000px', tableLayout: 'fixed' }}>
                 <thead>
                   <SortableContext items={contentColOrder} strategy={horizontalListSortingStrategy}>
                     <tr className="border-b border-gray-100 bg-gray-50/80 sticky top-0 z-10">
-                      {contentColOrder.map(colId => (
-                        <SortableHeader key={colId} id={colId} label={contentColLabels[colId]} />
+                      {safeArray(contentColOrder).map(colId => (
+                        <SortableHeader key={colId} id={colId} label={contentColLabels[colId]} type="content" />
                       ))}
                     </tr>
                   </SortableContext>
@@ -593,8 +616,8 @@ export default function ClientDetailPage() {
                     </tr>
                   ) : (
                     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleContentRowDragEnd} modifiers={[restrictToVerticalAxis]}>
-                      <SortableContext items={allContent.map(i => i.id)} strategy={verticalListSortingStrategy}>
-                        {allContent.map(item => <ContentSortableRow key={item.id} item={item} />)}
+                      <SortableContext items={allContent.map(i => i?.id)} strategy={verticalListSortingStrategy}>
+                        {allContent.map(item => <ContentSortableRow key={item?.id} item={item} />)}
                       </SortableContext>
                     </DndContext>
                   )}
@@ -637,8 +660,8 @@ export default function ClientDetailPage() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {allResources.map(res => (
-                <Card key={res.id} className="border border-gray-200 hover:shadow-md transition-shadow group">
+              {safeArray(allResources).map(res => (
+                <Card key={res?.id} className="border border-gray-200 hover:shadow-md transition-shadow group">
                   <CardContent className="p-4">
                     <div className="flex items-start gap-3">
                       <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600 flex-shrink-0">
@@ -655,10 +678,7 @@ export default function ClientDetailPage() {
                         </div>
                         <p className="font-semibold text-gray-900 text-sm truncate">{res.name}</p>
                         <p className="text-xs text-gray-400 truncate mt-0.5">
-                          {(() => {
-                            try { return new URL(res.url).hostname }
-                            catch { return 'resource link' }
-                          })()}
+                          {safeURL(res.url)?.hostname || 'resource link'}
                         </p>
                         <a href={res.url} target="_blank" rel="noopener noreferrer"
                           className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-900 text-white rounded text-xs font-medium hover:bg-gray-800 transition-colors w-full justify-center">
@@ -687,8 +707,8 @@ export default function ClientDetailPage() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {allReports.map(report => (
-                <Card key={report.id} className="border border-gray-200 hover:shadow-md transition-shadow">
+              {safeArray(allReports).map(report => (
+                <Card key={report?.id} className="border border-gray-200 hover:shadow-md transition-shadow">
                   <CardContent className="p-4">
                     <div className="flex items-start justify-between">
                       <div className="flex-1">

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useMemo } from 'react'
 import Link from 'next/link'
 import useSWR from 'swr'
 import { apiFetch, swrFetcher } from '@/lib/auth'
@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { EditableCell } from '@/components/EditableCell'
 import { LinkCell } from '@/components/LinkCell'
 import { FileText, Plus, ExternalLink, Trash2, Link2, Filter, Search, GripVertical, GripHorizontal } from 'lucide-react'
+import { safeJSON, safeArray } from '@/lib/safe'
 import {
   DndContext,
   closestCenter,
@@ -31,7 +32,7 @@ import { restrictToHorizontalAxis, restrictToVerticalAxis } from '@dnd-kit/modif
 
 import {
   OUTLINE_STATUSES, TOPIC_APPROVALS, BLOG_APPROVALS, BLOG_STATUSES,
-  topicApprovalColors, blogStatusColors, approvalColors
+  topicApprovalColors, blogStatusColors, approvalColors, CONTENT_COLUMN_WIDTHS
 } from '@/lib/constants'
 
 // Shared components imported from @/components/
@@ -40,8 +41,8 @@ export default function ContentCalendarPage() {
   const { data: contentData, mutate: mutateContent, error: contentErr } = useSWR('/api/content', swrFetcher)
   const { data: clientsData } = useSWR('/api/clients', swrFetcher)
 
-  const content = Array.isArray(contentData) ? contentData : []
-  const clients = Array.isArray(clientsData) ? clientsData : []
+  const content = useMemo(() => safeArray(contentData), [contentData])
+  const clients = useMemo(() => safeArray(clientsData), [clientsData])
   const loading = !contentData && !contentErr
   const [saving, setSaving] = useState({})
   const [filters, setFilters] = useState({ client_id: '', blog_status: '', search: '' })
@@ -50,13 +51,14 @@ export default function ContentCalendarPage() {
 
   useEffect(() => {
     const saved = localStorage.getItem('content_column_order')
-    if (saved) setColumnOrder(JSON.parse(saved))
+    const parsed = safeJSON(saved)
+    if (parsed) setColumnOrder(parsed)
     else setColumnOrder(['client', 'week', 'title', 'keyword', 'writer', 'topic_approval', 'blog_status', 'blog_approval', 'link', 'published', 'actions'])
   }, [])
 
   const updateContent = async (contentId, field, value) => {
     setSaving(s => ({ ...s, [contentId]: true }))
-    const updatedContent = content.map(c => c.id === contentId ? { ...c, [field]: value } : c)
+    const updatedContent = content.map(c => c?.id === contentId ? { ...c, [field]: value } : c)
     mutateContent(updatedContent, false)
     await apiFetch(`/api/content/${contentId}`, { method: 'PUT', body: JSON.stringify({ [field]: value }) })
     mutateContent()
@@ -70,25 +72,25 @@ export default function ContentCalendarPage() {
   }
 
   // Filter content
-  const filtered = content.filter(item => {
-    if (filters.client_id && item.client_id !== filters.client_id) return false
-    if (filters.blog_status && item.blog_status !== filters.blog_status) return false
+  const filtered = useMemo(() => content.filter(item => {
+    if (filters.client_id && item?.client_id !== filters.client_id) return false
+    if (filters.blog_status && item?.blog_status !== filters.blog_status) return false
     if (filters.search) {
       const search = filters.search.toLowerCase()
-      const matchTitle = item.blog_title?.toLowerCase().includes(search)
-      const matchKeyword = item.primary_keyword?.toLowerCase().includes(search)
-      const matchWriter = item.writer?.toLowerCase().includes(search)
+      const matchTitle = item?.blog_title?.toLowerCase().includes(search)
+      const matchKeyword = item?.primary_keyword?.toLowerCase().includes(search)
+      const matchWriter = item?.writer?.toLowerCase().includes(search)
       if (!matchTitle && !matchKeyword && !matchWriter) return false
     }
     return true
-  })
+  }), [content, filters])
 
   // Stats
-  const published = content.filter(c => c.blog_status === 'Published').length
-  const drafts = content.filter(c => c.blog_status === 'Draft').length
-  const inProgress = content.filter(c => c.blog_status === 'In Progress' || c.blog_status === 'Sent for Approval').length
+  const published = useMemo(() => content.filter(c => c?.blog_status === 'Published').length, [content])
+  const drafts = useMemo(() => content.filter(c => c?.blog_status === 'Draft').length, [content])
+  const inProgress = useMemo(() => content.filter(c => c?.blog_status === 'In Progress' || c?.blog_status === 'Sent for Approval').length, [content])
 
-  const clientMap = Object.fromEntries(clients.map(c => [c.id, c.name]))
+  const clientMap = useMemo(() => Object.fromEntries(clients.map(c => [c?.id, c?.name])), [clients])
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -123,34 +125,41 @@ export default function ContentCalendarPage() {
 
   // --- Column and Row Components ---
   const SortableHeader = ({ id, label }) => {
-    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
-    const style = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 20 : 0 }
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: id || 'header' })
+    const style = {
+      transform: CSS.Transform.toString(transform),
+      transition,
+      zIndex: isDragging ? 20 : 0,
+      width: CONTENT_COLUMN_WIDTHS[id] || 'auto',
+      minWidth: CONTENT_COLUMN_WIDTHS[id] || 'auto'
+    }
     return (
       <th ref={setNodeRef} style={style} className={`text-left px-3 py-2.5 font-semibold text-gray-600 bg-gray-50 border-r border-gray-100 last:border-0 ${isDragging ? 'opacity-50' : ''}`}>
-        <div className="flex items-center gap-2">
-          <div {...attributes} {...listeners} className="cursor-grab hover:text-blue-500">
+        <div className="flex items-center gap-2 overflow-hidden">
+          <div {...attributes} {...listeners} className="cursor-grab hover:text-blue-500 flex-shrink-0">
             <GripHorizontal className="w-3 h-3" />
           </div>
-          <span>{label}</span>
+          <span className="truncate" title={label}>{label}</span>
         </div>
       </th>
     )
   }
 
   const SortableRow = ({ item }) => {
-    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id })
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item?.id || 'unknown' })
+    if (!item?.id) return null
     const style = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 20 : 0 }
     return (
       <tr ref={setNodeRef} style={style} className={`hover:bg-gray-50 group border-b border-gray-100 ${isDragging ? 'opacity-50 shadow-lg' : ''}`}>
-        {columnOrder.map(colId => (
-          <td key={colId} className="px-3 py-1.5">
+        {safeArray(columnOrder).map(colId => (
+          <td key={colId} className="px-3 py-1.5 overflow-hidden" style={{ width: CONTENT_COLUMN_WIDTHS[colId], minWidth: CONTENT_COLUMN_WIDTHS[colId] }}>
             {colId === 'client' && (
               <div className="flex items-center gap-2">
                 <div {...attributes} {...listeners} className="cursor-grab text-gray-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity">
                   <GripVertical className="w-3 h-3" />
                 </div>
-                <Link href={`/dashboard/clients/${item.client_id}`} className="text-xs text-blue-600 hover:underline font-medium">
-                  {clientMap[item.client_id] || 'Unknown'}
+                <Link href={`/dashboard/clients/${item?.client_id}`} className="text-xs text-blue-600 hover:underline font-medium">
+                  {clientMap[item?.client_id] || 'Unknown'}
                 </Link>
               </div>
             )}
@@ -228,7 +237,7 @@ export default function ContentCalendarPage() {
             <SelectTrigger className="w-48 h-8 text-sm"><SelectValue placeholder="All Clients" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="__all__">All Clients</SelectItem>
-              {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+              {safeArray(clients).map(c => <SelectItem key={c?.id} value={c?.id}>{c?.name}</SelectItem>)}
             </SelectContent>
           </Select>
           <Select value={filters.blog_status || '__all__'} onValueChange={v => setFilters(f => ({ ...f, blog_status: v === '__all__' ? '' : v }))}>
@@ -245,7 +254,7 @@ export default function ContentCalendarPage() {
       {/* Main Table with DnD */}
       <div className="bg-white border border-gray-200 rounded-lg overflow-auto shadow-sm">
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleColDragEnd} modifiers={[restrictToHorizontalAxis]}>
-          <table className="w-full text-sm" style={{ minWidth: '1300px', tableLayout: 'fixed' }}>
+          <table className="w-full text-sm" style={{ minWidth: '1500px', tableLayout: 'fixed' }}>
             <thead>
               <SortableContext items={columnOrder} strategy={horizontalListSortingStrategy}>
                 <tr className="border-b border-gray-100 bg-gray-50/80 sticky top-0 z-10 text-xs">
@@ -265,8 +274,8 @@ export default function ContentCalendarPage() {
                 </tr>
               ) : (
                 <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleRowDragEnd} modifiers={[restrictToVerticalAxis]}>
-                  <SortableContext items={filtered.map(i => i.id)} strategy={verticalListSortingStrategy}>
-                    {filtered.map(item => <SortableRow key={item.id} item={item} />)}
+                  <SortableContext items={filtered.map(i => i?.id)} strategy={verticalListSortingStrategy}>
+                    {filtered.map(item => <SortableRow key={item?.id} item={item} />)}
                   </SortableContext>
                 </DndContext>
               )}

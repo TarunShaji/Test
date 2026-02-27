@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import useSWR from 'swr'
 import { apiFetch, swrFetcher } from '@/lib/auth'
+import { safeArray } from '@/lib/safe'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Users, CheckSquare, Clock, AlertTriangle, TrendingUp } from 'lucide-react'
@@ -87,16 +88,16 @@ export default function DashboardPage() {
         </CardHeader>
         <CardContent className="p-0">
           <div className="divide-y divide-gray-50">
-            {(stats?.recentActivity || []).slice(0, 15).map((task) => (
+            {safeArray(stats?.recentActivity).slice(0, 15).map((task) => (
               <div key={task.id} className="flex items-center gap-4 px-6 py-3 hover:bg-gray-50 transition-colors">
-                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusColors[task.status] || 'bg-gray-100 text-gray-700'
-                  }`}>{task.status}</span>
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusColors[task?.status] || 'bg-gray-100 text-gray-700'
+                  }`}>{task?.status}</span>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900 truncate">{task.title}</p>
-                  <p className="text-xs text-gray-400">{task.client_name}</p>
+                  <p className="text-sm font-medium text-gray-900 truncate">{task?.title}</p>
+                  <p className="text-xs text-gray-400">{task?.client_name}</p>
                 </div>
                 <div className="text-xs text-gray-400 flex-shrink-0">
-                  {task.category}
+                  {task?.category}
                 </div>
               </div>
             ))}

@@ -1,0 +1,27 @@
+{
+    "extends": "next/core-web-vitals",
+    "rules": {
+        "no-restricted-syntax": [
+            "error",
+            {
+                "selector": "NewExpression[callee.name='URL']",
+                "message": "Direct 'new URL()' is disallowed for resilience. Use 'safeURL' from '@/lib/safe' instead."
+            },
+            {
+                "selector": "CallExpression[callee.object.name='JSON'][callee.property.name='parse']",
+                "message": "Direct 'JSON.parse()' is disallowed for resilience. Use 'safeJSON' from '@/lib/safe' instead."
+            }
+        ]
+    },
+    "overrides": [
+        {
+            "files": [
+                "lib/safe.js",
+                "lib/safe.ts"
+            ],
+            "rules": {
+                "no-restricted-syntax": "off"
+            }
+        }
+    ]
+}

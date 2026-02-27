@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { apiFetch } from '@/lib/auth'
+import { safeArray } from '@/lib/safe'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -70,7 +71,7 @@ export default function ReportsPage() {
           <SelectTrigger className="w-48 h-8 text-sm"><SelectValue placeholder="All Clients" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="">All Clients</SelectItem>
-            {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+            {safeArray(clients).map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
           </SelectContent>
         </Select>
       </div>
@@ -81,14 +82,13 @@ export default function ReportsPage() {
         <div className="text-center py-12 text-gray-400">No reports yet</div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {reports.map(report => (
+          {safeArray(reports).map(report => (
             <Card key={report.id} className="border border-gray-200 hover:shadow-md transition-shadow">
               <CardContent className="p-4">
                 <div className="flex items-start justify-between">
                   <div className="flex-1 min-w-0">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium mb-2 ${
-                      typeColors[report.report_type] || 'bg-gray-50 text-gray-700'
-                    }`}>{report.report_type}</span>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium mb-2 ${typeColors[report.report_type] || 'bg-gray-50 text-gray-700'
+                      }`}>{report.report_type}</span>
                     <p className="font-medium text-gray-900 text-sm">{report.title}</p>
                     <p className="text-xs text-blue-600 font-medium mt-0.5">{report.client_name}</p>
                     <p className="text-xs text-gray-400 mt-1">{report.report_date}</p>
@@ -99,7 +99,7 @@ export default function ReportsPage() {
                   </button>
                 </div>
                 <a href={report.report_url} target="_blank" rel="noopener noreferrer"
-                   className="mt-3 inline-flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700">
+                  className="mt-3 inline-flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700">
                   View Report <ExternalLink className="w-3 h-3" />
                 </a>
               </CardContent>
@@ -116,7 +116,7 @@ export default function ReportsPage() {
               <label className="text-sm font-medium">Client</label>
               <Select value={form.client_id} onValueChange={v => setForm(f => ({ ...f, client_id: v }))}>
                 <SelectTrigger className="mt-1"><SelectValue placeholder="Select client" /></SelectTrigger>
-                <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+                <SelectContent>{safeArray(clients).map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
               </Select>
             </div>
             <div>
@@ -127,7 +127,7 @@ export default function ReportsPage() {
               <label className="text-sm font-medium">Type</label>
               <Select value={form.report_type} onValueChange={v => setForm(f => ({ ...f, report_type: v }))}>
                 <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                <SelectContent>{REPORT_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
+                <SelectContent>{safeArray(REPORT_TYPES).map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
               </Select>
             </div>
             <div>

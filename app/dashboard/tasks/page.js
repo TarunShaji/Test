@@ -1,14 +1,15 @@
 'use client'
 
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useMemo } from 'react'
 import { apiFetch } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Plus, Trash2, RefreshCw, Link2, GripVertical, GripHorizontal } from 'lucide-react'
+import { safeJSON, safeArray } from '@/lib/safe'
 import { EditableCell } from '@/components/EditableCell'
 import { LinkCell } from '@/components/LinkCell'
-import { STATUSES, CATEGORIES, PRIORITIES, APPROVALS, INTERNAL_APPROVALS, statusColors, priorityColors, approvalColors, internalApprovalColors } from '@/lib/constants'
+import { STATUSES, CATEGORIES, PRIORITIES, APPROVALS, INTERNAL_APPROVALS, statusColors, priorityColors, approvalColors, internalApprovalColors, TASK_COLUMN_WIDTHS } from '@/lib/constants'
 import {
   DndContext,
   closestCenter,
@@ -53,7 +54,8 @@ export default function AllTasksPage() {
 
   useEffect(() => {
     const saved = localStorage.getItem('tasks_column_order')
-    if (saved) setColumnOrder(JSON.parse(saved))
+    const parsed = safeJSON(saved)
+    if (parsed) setColumnOrder(parsed)
     else setColumnOrder(['selection', 'client', 'title', 'category', 'status', 'priority', 'eta', 'assigned', 'link', 'internal_approval', 'send_link', 'client_approval', 'client_feedback', 'actions'])
   }, [])
 
@@ -78,16 +80,16 @@ export default function AllTasksPage() {
     const [tasksData, clientsData, membersData] = await Promise.all([
       tasksRes.json(), clientsRes.json(), membersRes.json(),
     ])
-    setTasks(tasksData || [])
-    setClients(clientsData || [])
-    setMembers(membersData || [])
+    setTasks(safeArray(tasksData))
+    setClients(safeArray(clientsData))
+    setMembers(safeArray(membersData))
     setLoading(false)
   }
 
   useEffect(() => { loadData() }, [filterClient, filterStatus, filterCategory, filterAssignee, filterPriority])
 
   const updateTask = async (taskId, field, value) => {
-    const task = (tasks || []).find(t => t.id === taskId)
+    const task = safeArray(tasks).find(t => t?.id === taskId)
     if (!task) return
 
     setSaving(s => ({ ...s, [taskId]: true }))
@@ -159,16 +161,18 @@ export default function AllTasksPage() {
     setAddingTask(false)
   }
 
-  const memberMap = Object.fromEntries(members.map(m => [m.id, m.name]))
-  const anyFilter = filterClient !== 'all' || filterStatus !== 'all' || filterCategory !== 'all' || filterAssignee !== 'all' || filterPriority !== 'all'
+  const allTasks = useMemo(() => safeArray(tasks), [tasks])
+  const memberMap = useMemo(() => Object.fromEntries(safeArray(members).map(m => [m?.id, m?.name])), [members])
+  const anyFilter = useMemo(() => filterClient !== 'all' || filterStatus !== 'all' || filterCategory !== 'all' || filterAssignee !== 'all' || filterPriority !== 'all', [filterClient, filterStatus, filterCategory, filterAssignee, filterPriority])
 
-  const sorted = sortField
-    ? [...tasks].sort((a, b) => {
-      const va = a[sortField] || ''
-      const vb = b[sortField] || ''
+  const sorted = useMemo(() => {
+    if (!sortField) return allTasks
+    return [...allTasks].sort((a, b) => {
+      const va = a?.[sortField] || ''
+      const vb = b?.[sortField] || ''
       return sortDir === 'asc' ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va))
     })
-    : tasks
+  }, [allTasks, sortField, sortDir])
 
   const handleSort = (field) => {
     if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -211,15 +215,21 @@ export default function AllTasksPage() {
 
   // --- Column and Row Components ---
   const SortableHeader = ({ id, label, sortField: sField }) => {
-    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
-    const style = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 20 : 0 }
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: id || 'header' })
+    const style = {
+      transform: CSS.Transform.toString(transform),
+      transition,
+      zIndex: isDragging ? 20 : 0,
+      width: TASK_COLUMN_WIDTHS[id] || 'auto',
+      minWidth: TASK_COLUMN_WIDTHS[id] || 'auto'
+    }
     return (
       <th ref={setNodeRef} style={style} className={`text-left px-3 py-2.5 font-semibold text-gray-600 bg-gray-50 border-r border-gray-100 last:border-0 ${isDragging ? 'opacity-50' : ''}`}>
-        <div className="flex items-center gap-2">
-          <div {...attributes} {...listeners} className="cursor-grab hover:text-blue-500">
+        <div className="flex items-center gap-2 overflow-hidden">
+          <div {...attributes} {...listeners} className="cursor-grab hover:text-blue-500 flex-shrink-0">
             <GripHorizontal className="w-3 h-3" />
           </div>
-          <span className={sField ? 'cursor-pointer hover:text-gray-900' : ''} onClick={() => sField && handleSort(sField)}>
+          <span className={`truncate ${sField ? 'cursor-pointer hover:text-gray-900' : ''}`} onClick={() => sField && handleSort(sField)} title={label}>
             {label} {sField && <SortIcon field={sField} />}
           </span>
         </div>
@@ -228,15 +238,16 @@ export default function AllTasksPage() {
   }
 
   const SortableRow = ({ task }) => {
-    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id })
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task?.id || 'unknown' })
+    if (!task?.id) return null
     const style = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 20 : 0 }
 
     return (
-      <tr ref={setNodeRef} style={style} className={`hover:bg-gray-50 group border-b border-gray-100 ${selected.includes(task.id) ? 'bg-blue-50' : ''} ${isDragging ? 'opacity-50 shadow-lg' : ''}`}>
-        {columnOrder.map(colId => (
-          <td key={colId} className={`px-3 py-1.5 ${colId === 'internal_approval' || colId === 'send_link' ? 'bg-gray-50/50' : ''}`}>
+      <tr ref={setNodeRef} style={style} className={`hover:bg-gray-50 group border-b border-gray-100 ${selected.includes(task?.id) ? 'bg-blue-50' : ''} ${isDragging ? 'opacity-50 shadow-lg' : ''}`}>
+        {safeArray(columnOrder).map(colId => (
+          <td key={colId} className={`px-3 py-1.5 overflow-hidden ${colId === 'internal_approval' || colId === 'send_link' ? 'bg-gray-50/50' : ''}`} style={{ width: TASK_COLUMN_WIDTHS[colId], minWidth: TASK_COLUMN_WIDTHS[colId] }}>
             {colId === 'selection' && (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3 px-1">
                 <div {...attributes} {...listeners} className="cursor-grab text-gray-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity">
                   <GripVertical className="w-3 h-3" />
                 </div>
@@ -297,7 +308,7 @@ export default function AllTasksPage() {
               </div>
             )}
             {colId === 'actions' && (
-              <button onClick={() => deleteTask(task.id)} className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-50 text-red-400 transition-all">
+              <button onClick={() => deleteTask(task?.id)} className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-50 text-red-400 transition-all">
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
             )}
@@ -332,7 +343,7 @@ export default function AllTasksPage() {
           <SelectTrigger className="h-8 text-xs w-36"><SelectValue placeholder="All Clients" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all" className="text-xs">All Clients</SelectItem>
-            {clients.map(c => <SelectItem key={c.id} value={c.id} className="text-xs">{c.name}</SelectItem>)}
+            {safeArray(clients).map(c => <SelectItem key={c?.id} value={c?.id} className="text-xs">{c?.name}</SelectItem>)}
           </SelectContent>
         </Select>
         <Select value={filterStatus} onValueChange={setFilterStatus}>
@@ -353,7 +364,7 @@ export default function AllTasksPage() {
           <SelectTrigger className="h-8 text-xs w-36"><SelectValue placeholder="All Members" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all" className="text-xs">All Members</SelectItem>
-            {members.map(m => <SelectItem key={m.id} value={m.id} className="text-xs">{m.name}</SelectItem>)}
+            {safeArray(members).map(m => <SelectItem key={m?.id} value={m?.id} className="text-xs">{m?.name}</SelectItem>)}
           </SelectContent>
         </Select>
         <Select value={filterPriority} onValueChange={setFilterPriority}>
@@ -392,7 +403,7 @@ export default function AllTasksPage() {
       {/* Main Table with DnD */}
       <div className="bg-white border border-gray-200 rounded-lg overflow-auto shadow-sm">
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleColDragEnd} modifiers={[restrictToHorizontalAxis]}>
-          <table className="w-full text-sm" style={{ minWidth: '1200px', tableLayout: 'fixed' }}>
+          <table className="w-full text-sm" style={{ minWidth: '1800px', tableLayout: 'fixed' }}>
             <thead>
               <SortableContext items={columnOrder} strategy={horizontalListSortingStrategy}>
                 <tr className="border-b border-gray-200 bg-gray-50/80">
@@ -409,8 +420,8 @@ export default function AllTasksPage() {
                 <tr><td colSpan={columnOrder.length} className="px-4 py-8 text-center text-gray-400">No tasks found</td></tr>
               ) : (
                 <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleRowDragEnd} modifiers={[restrictToVerticalAxis]}>
-                  <SortableContext items={sorted.map(t => t.id)} strategy={verticalListSortingStrategy}>
-                    {sorted.map(task => <SortableRow key={task.id} task={task} />)}
+                  <SortableContext items={sorted.map(t => t?.id)} strategy={verticalListSortingStrategy}>
+                    {sorted.map(task => <SortableRow key={task?.id} task={task} />)}
                   </SortableContext>
                 </DndContext>
               )}
@@ -423,7 +434,7 @@ export default function AllTasksPage() {
                     <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Client" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="__none__" className="text-xs text-gray-400">Select client…</SelectItem>
-                      {clients.map(c => <SelectItem key={c.id} value={c.id} className="text-xs">{c.name}</SelectItem>)}
+                      {safeArray(clients).map(c => <SelectItem key={c?.id} value={c?.id} className="text-xs">{c?.name}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </td>

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { connectToMongo } from '@/lib/mongodb'
 import { handleCORS, withAuth } from '@/lib/api-utils'
-import { applyTaskTransition } from '@/lib/lifecycleEngine'
+import { applyTaskTransition, assertTaskInvariant } from '@/lib/lifecycleEngine'
 
 export async function POST(request, { params }) {
     return withAuth(request, async () => {
@@ -27,9 +27,18 @@ export async function POST(request, { params }) {
                 { $set: finalUpdate }
             )
 
+            // Post-Update Re-Verification
+            const updated = await database.collection('tasks').findOne({ id: taskId })
+            try {
+                assertTaskInvariant(updated);
+            } catch (criticalError) {
+                console.error('CRITICAL: Post-update invariant violation in Publish!', { taskId, state: updated });
+                return handleCORS(NextResponse.json({ error: 'Critical system error: Invariant violation' }, { status: 500 }))
+            }
+
             return handleCORS(NextResponse.json({
                 message: 'Task successfully published to portal',
-                task: finalUpdate
+                task: updated
             }))
         } catch (error) {
             return handleCORS(NextResponse.json({ error: 'Internal server error', details: error.message }, { status: 500 }))

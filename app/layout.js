@@ -9,6 +9,7 @@ export const metadata = {
 }
 
 import { SWRProvider } from '@/components/SWRProvider'
+import ErrorBoundary from '@/components/ErrorBoundary'
 
 export default function RootLayout({ children }) {
   return (
@@ -17,9 +18,11 @@ export default function RootLayout({ children }) {
         <script dangerouslySetInnerHTML={{ __html: 'window.addEventListener("error",function(e){if(e.error instanceof DOMException&&e.error.name==="DataCloneError"){e.stopImmediatePropagation();e.preventDefault()}},true);' }} />
       </head>
       <body className={inter.className}>
-        <SWRProvider>
-          {children}
-        </SWRProvider>
+        <ErrorBoundary>
+          <SWRProvider>
+            {children}
+          </SWRProvider>
+        </ErrorBoundary>
       </body>
     </html>
   )

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { connectToMongo } from '@/lib/mongodb'
 import { handleCORS, withErrorLogging } from '@/lib/api-utils'
+import { safeArray } from '@/lib/safe'
 
 export async function GET(request, { params }) {
     return withErrorLogging(request, async () => {
@@ -28,11 +29,11 @@ export async function GET(request, { params }) {
         const reports = await database.collection('reports').find({ client_id: clientData.id }).sort({ report_date: -1 }).toArray()
         const contentItems = await database.collection('content_items').find({ client_id: clientData.id }).sort({ created_at: -1 }).toArray()
 
-        const cleanTasks = tasks.map(({ _id, ...t }) => t)
-        const cleanReports = reports.map(({ _id, ...r }) => r)
-        const cleanContent = contentItems.map(({ _id, ...c }) => c)
+        const cleanTasks = safeArray(tasks).map(({ _id, ...t }) => t)
+        const cleanReports = safeArray(reports).map(({ _id, ...r }) => r)
+        const cleanContent = safeArray(contentItems).map(({ _id, ...c }) => c)
         const resources = await database.collection('client_resources').find({ client_id: clientData.id }).sort({ created_at: -1 }).toArray()
-        const cleanResources = resources.map(({ _id, ...r }) => r)
+        const cleanResources = safeArray(resources).map(({ _id, ...r }) => r)
 
         return handleCORS(NextResponse.json({
             client: clientData,

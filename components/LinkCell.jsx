@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react'
 import { Link2 } from 'lucide-react'
+import { normalizeUrl } from '@/lib/utils'
 
 export function LinkCell({ value, onSave }) {
     const [editing, setEditing] = useState(false)
@@ -31,7 +32,7 @@ export function LinkCell({ value, onSave }) {
     if (val) {
         return (
             <div className="flex items-center gap-1">
-                <a href={val} target="_blank" rel="noopener noreferrer"
+                <a href={normalizeUrl(val)} target="_blank" rel="noopener noreferrer"
                     onClick={e => e.stopPropagation()}
                     className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 text-xs font-medium transition-colors"
                     title={val}
