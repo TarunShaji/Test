@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Card, CardContent } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { Plus, Trash2, Mail, UserCircle } from 'lucide-react'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 
 const ROLES = ['SEO', 'Design', 'Tech', 'Account Manager', 'Admin']
 
@@ -28,6 +29,7 @@ export default function TeamPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [tab, setTab] = useState('members') // 'members' | 'tasks'
+  const [confirmConfig, setConfirmConfig] = useState(null)
 
   const loadData = async () => {
     try {
@@ -45,10 +47,15 @@ export default function TeamPage() {
   useEffect(() => { loadData() }, [])
 
 
-  const deactivate = async (id) => {
-    if (!confirm('Remove this team member?')) return
-    await apiFetch(`/api/team/${id}`, { method: 'DELETE' })
-    setMembers(m => m.filter(x => x.id !== id))
+  const deactivate = (id) => {
+    setConfirmConfig({
+      title: 'Remove Team Member',
+      description: 'This will remove the team member from the system.',
+      onConfirm: async () => {
+        await apiFetch(`/api/team/${id}`, { method: 'DELETE' })
+        setMembers(m => m.filter(x => x.id !== id))
+      }
+    })
   }
 
   const filtered = selectedMember
@@ -170,6 +177,7 @@ export default function TeamPage() {
         </div>
       )}
 
+      <ConfirmDialog config={confirmConfig} onClose={() => setConfirmConfig(null)} />
     </div>
   )
 }

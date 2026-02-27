@@ -481,6 +481,7 @@ export default function AllTasksPage() {
           </table>
         </DndContext>
       </div>
+      <ConfirmDialog config={confirmConfig} onClose={() => setConfirmConfig(null)} />
     </div>
   )
 }

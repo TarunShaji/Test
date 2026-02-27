@@ -309,6 +309,7 @@ export default function ContentCalendarPage() {
       <div className="mt-4 text-xs text-gray-400">
         Showing {filtered.length} of {content.length} items • Drag headers to reorder columns
       </div>
+      <ConfirmDialog config={confirmConfig} onClose={() => setConfirmConfig(null)} />
     </div>
   )
 }

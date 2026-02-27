@@ -6,10 +6,9 @@ import { validateBody, rejectFields } from '@/lib/validation'
 import { ContentUpdateSchema } from '@/lib/schemas/content.schema'
 
 const FORBIDDEN_FIELDS = [
-    'topic_approval_status',
     'topic_approval_date',
-    'blog_approval_status',
-    'blog_approval_date'
+    'blog_approval_date',
+    '_id'
 ];
 
 export async function PUT(request, { params }) {

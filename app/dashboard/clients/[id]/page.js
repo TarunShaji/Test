@@ -16,6 +16,7 @@ import { Label } from '@/components/ui/label'
 import { EditableCell } from '@/components/EditableCell'
 import { LinkCell } from '@/components/LinkCell'
 import { Plus, ExternalLink, Trash2, Link2, Settings, BarChart3, FileText, GripVertical, GripHorizontal, Folder, Image, Library } from 'lucide-react'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 import {
   DndContext,
   closestCenter,
@@ -66,6 +67,7 @@ export default function ClientDetailPage() {
   const [settingsForm, setSettingsForm] = useState({})
   const [taskColOrder, setTaskColOrder] = useState([])
   const [contentColOrder, setContentColOrder] = useState([])
+  const [confirmConfig, setConfirmConfig] = useState(null)
 
   useEffect(() => {
     const savedTasks = localStorage.getItem('client_tasks_col_order')
@@ -159,10 +161,15 @@ export default function ClientDetailPage() {
     setAddingTask(false)
   }
 
-  const deleteTask = async (taskId) => {
-    if (!confirm('Delete this task?')) return
-    await apiFetch(`/api/tasks/${taskId}`, { method: 'DELETE' })
-    mutateTasks()
+  const deleteTask = (taskId) => {
+    setConfirmConfig({
+      title: 'Delete Task',
+      description: 'This will permanently delete the task. This cannot be undone.',
+      onConfirm: async () => {
+        await apiFetch(`/api/tasks/${taskId}`, { method: 'DELETE' })
+        mutateTasks()
+      }
+    })
   }
 
   const addReport = async (e) => {
@@ -186,10 +193,15 @@ export default function ClientDetailPage() {
     setShowSettings(false)
   }
 
-  const deleteReport = async (reportId) => {
-    if (!confirm('Delete this report?')) return
-    await apiFetch(`/api/reports/${reportId}`, { method: 'DELETE' })
-    mutateReports()
+  const deleteReport = (reportId) => {
+    setConfirmConfig({
+      title: 'Delete Report',
+      description: 'This will permanently delete the report. This cannot be undone.',
+      onConfirm: async () => {
+        await apiFetch(`/api/reports/${reportId}`, { method: 'DELETE' })
+        mutateReports()
+      }
+    })
   }
 
   const addResource = async (e) => {
@@ -202,10 +214,15 @@ export default function ClientDetailPage() {
     }
   }
 
-  const deleteResource = async (resId) => {
-    if (!confirm('Delete this resource?')) return
-    await apiFetch(`/api/clients/${id}/resources/${resId}`, { method: 'DELETE' })
-    mutateResources()
+  const deleteResource = (resId) => {
+    setConfirmConfig({
+      title: 'Delete Resource',
+      description: 'This will permanently delete the resource link. This cannot be undone.',
+      onConfirm: async () => {
+        await apiFetch(`/api/clients/${id}/resources/${resId}`, { method: 'DELETE' })
+        mutateResources()
+      }
+    })
   }
 
   const updateResource = async (resId, field, value) => {
@@ -243,10 +260,15 @@ export default function ClientDetailPage() {
     setAddingContent(false)
   }
 
-  const deleteContent = async (contentId) => {
-    if (!confirm('Delete this content item?')) return
-    await apiFetch(`/api/content/${contentId}`, { method: 'DELETE' })
-    mutateContent()
+  const deleteContent = (contentId) => {
+    setConfirmConfig({
+      title: 'Delete Content Item',
+      description: 'This will permanently delete this blog post entry. This cannot be undone.',
+      onConfirm: async () => {
+        await apiFetch(`/api/content/${contentId}`, { method: 'DELETE' })
+        mutateContent()
+      }
+    })
   }
 
   const allTasks = useMemo(() => safeArray(tasks), [tasks])
@@ -838,6 +860,7 @@ export default function ClientDetailPage() {
           </form>
         </DialogContent>
       </Dialog>
+      <ConfirmDialog config={confirmConfig} onClose={() => setConfirmConfig(null)} />
     </div>
   )
 }

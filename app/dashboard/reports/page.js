@@ -156,6 +156,7 @@ export default function ReportsPage() {
           </form>
         </DialogContent>
       </Dialog>
+      <ConfirmDialog config={confirmConfig} onClose={() => setConfirmConfig(null)} />
     </div>
   )
 }
