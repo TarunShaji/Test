@@ -25,8 +25,6 @@ export default function TeamPage() {
   const [tasks, setTasks] = useState([])
   const [selectedMember, setSelectedMember] = useState('')
   const [loading, setLoading] = useState(true)
-  const [showAdd, setShowAdd] = useState(false)
-  const [form, setForm] = useState({ name: '', email: '', role: 'SEO', password: 'CubeHQ2025!' })
   const [saving, setSaving] = useState(false)
   const [tab, setTab] = useState('members') // 'members' | 'tasks'
 
@@ -45,20 +43,6 @@ export default function TeamPage() {
 
   useEffect(() => { loadData() }, [])
 
-  const addMember = async (e) => {
-    e.preventDefault()
-    setSaving(true)
-    const res = await apiFetch('/api/team', { method: 'POST', body: JSON.stringify(form) })
-    const data = await res.json()
-    if (res.ok) {
-      setMembers(m => [...m, data])
-      setShowAdd(false)
-      setForm({ name: '', email: '', role: 'SEO', password: 'CubeHQ2025!' })
-    } else {
-      alert(data.error || 'Failed to add member')
-    }
-    setSaving(false)
-  }
 
   const deactivate = async (id) => {
     if (!confirm('Remove this team member?')) return
@@ -93,15 +77,12 @@ export default function TeamPage() {
           <h1 className="text-2xl font-bold text-gray-900">Team</h1>
           <p className="text-gray-500 text-sm mt-1">{members.length} team members</p>
         </div>
-        <Button onClick={() => setShowAdd(true)} className="gap-2" size="sm">
-          <Plus className="w-4 h-4" /> Add Member
-        </Button>
       </div>
 
       {/* Tabs */}
       <div className="flex gap-1 mb-6 bg-gray-100 p-1 rounded-lg w-fit">
-        <button onClick={() => setTab('members')} className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${ tab === 'members' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700' }`}>Members</button>
-        <button onClick={() => setTab('tasks')} className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${ tab === 'tasks' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700' }`}>Tasks by Member</button>
+        <button onClick={() => setTab('members')} className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${tab === 'members' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>Members</button>
+        <button onClick={() => setTab('tasks')} className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${tab === 'tasks' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>Tasks by Member</button>
       </div>
 
       {tab === 'members' && (
@@ -145,13 +126,13 @@ export default function TeamPage() {
           <div className="flex flex-wrap gap-2 mb-5">
             <button
               onClick={() => setSelectedMember('')}
-              className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${ !selectedMember ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300' }`}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${!selectedMember ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`}
             >All Members</button>
             {members.map(m => (
               <button
                 key={m.id}
                 onClick={() => setSelectedMember(selectedMember === m.id ? '' : m.id)}
-                className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${ selectedMember === m.id ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300' }`}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${selectedMember === m.id ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`}
               >{m.name}</button>
             ))}
           </div>
@@ -171,7 +152,7 @@ export default function TeamPage() {
                           <td className="px-4 py-2 font-medium text-gray-800">{task.title}</td>
                           <td className="px-4 py-2 text-gray-400">{task.category}</td>
                           <td className="px-4 py-2">
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${ statusColors[task.status] || 'bg-gray-100 text-gray-600' }`}>{task.status}</span>
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusColors[task.status] || 'bg-gray-100 text-gray-600'}`}>{task.status}</span>
                           </td>
                           <td className="px-4 py-2 text-gray-400">{task.eta_end || '—'}</td>
                         </tr>
@@ -188,36 +169,6 @@ export default function TeamPage() {
         </div>
       )}
 
-      <Dialog open={showAdd} onOpenChange={setShowAdd}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Add Team Member</DialogTitle></DialogHeader>
-          <form onSubmit={addMember} className="space-y-3">
-            <div>
-              <Label>Full Name</Label>
-              <Input value={form.name} onChange={e => setForm(f => ({...f, name: e.target.value}))} required placeholder="e.g. Sarah Chen" className="mt-1" />
-            </div>
-            <div>
-              <Label>Email</Label>
-              <Input type="email" value={form.email} onChange={e => setForm(f => ({...f, email: e.target.value}))} required placeholder="sarah@cubehq.ai" className="mt-1" />
-            </div>
-            <div>
-              <Label>Role</Label>
-              <Select value={form.role} onValueChange={v => setForm(f => ({...f, role: v}))}>
-                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                <SelectContent>{ROLES.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Initial Password</Label>
-              <Input value={form.password} onChange={e => setForm(f => ({...f, password: e.target.value}))} required placeholder="CubeHQ2025!" className="mt-1" />
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setShowAdd(false)}>Cancel</Button>
-              <Button type="submit" disabled={saving}>{saving ? 'Adding...' : 'Add Member'}</Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }

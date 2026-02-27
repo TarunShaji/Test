@@ -10,7 +10,7 @@ import sys
 from datetime import datetime
 
 # Base URL from environment
-BASE_URL = "https://workflow-hub-274.preview.emergentagent.com"
+BASE_URL = "http://localhost:3000"
 API_BASE = f"{BASE_URL}/api"
 
 class APITester:
@@ -81,6 +81,35 @@ class APITester:
             return False
             
         self.log_test("Seed Data Creation", True, "Demo data seeded successfully")
+        return True
+
+    def test_register_user(self):
+        """Test POST /api/auth/register - Create new team member"""
+        reg_data = {
+            "name": "New Tester",
+            "email": f"tester_{datetime.now().timestamp()}@agency.com",
+            "role": "SEO",
+            "password": "password123"
+        }
+        
+        response, error = self.make_request("POST", "/auth/register", reg_data)
+        if error:
+            self.log_test("User Registration", False, error_msg=error)
+            return False
+            
+        if response.status_code != 201:
+            self.log_test("User Registration", False, 
+                         error_msg=f"Status {response.status_code}: {response.text}")
+            return False
+            
+        # Test duplicate email
+        response, error = self.make_request("POST", "/auth/register", reg_data)
+        if response.status_code != 409:
+            self.log_test("User Registration (Duplicate)", False, 
+                         error_msg=f"Expected 409 for duplicate email, got {response.status_code}")
+            return False
+            
+        self.log_test("User Registration", True, f"Registered new user and blocked duplicate: {reg_data['email']}")
         return True
 
     def test_auth_login(self):
@@ -625,8 +654,12 @@ class APITester:
                 self.log_test("Get Content Items (Empty)", False, error_msg="Response is not a list")
                 return False
                 
+            if len(items) > 0:
+                self.log_test("Get Content Items (Empty)", False, error_msg=f"Found {len(items)} items, expected 0. Seed might be leaving data.")
+                return False
+
             self.log_test("Get Content Items (Empty)", True, 
-                         f"Retrieved {len(items)} content items (expected 0 initially)")
+                         f"Retrieved {len(items)} content items (expected 0)")
             return True
         except json.JSONDecodeError:
             self.log_test("Get Content Items (Empty)", False, error_msg="Invalid JSON response")
@@ -941,6 +974,118 @@ class APITester:
             self.log_test("Portal Content Approval", False, error_msg="Invalid JSON response")
             return False
 
+    def test_task_lifecycle_hardening(self):
+        """Test task lifecycle state guards and auto-reverts"""
+        if not self.auth_token or not self.bandolier_client_id:
+            self.log_test("Task Lifecycle Hardening", False, error_msg="Prerequisites missing")
+            return False
+
+        # 1. Verify invalid transition: Internal Approval="Approved" while Status="In Progress"
+        task_data = {
+            "title": "Lifecycle Test Task",
+            "client_id": self.bandolier_client_id,
+            "status": "In Progress",
+            "internal_approval": "Approved"
+        }
+        response, _ = self.make_request("POST", "/tasks", task_data)
+        
+        if response.status_code == 400:
+            # Great, hardened POST blocked it! We still need a task to test PUT auto-reverts.
+            task_data["internal_approval"] = "Pending"
+            response, _ = self.make_request("POST", "/tasks", task_data)
+        
+        task_id = response.json().get("id")
+        if not task_id:
+            self.log_test("Task Lifecycle Hardening", False, error_msg="Failed to create test task")
+            return False
+
+        # Now try to PUT Approved while In Progress - should be blocked
+        update_data = {"internal_approval": "Approved"}
+        response, _ = self.make_request("PUT", f"/tasks/{task_id}", update_data)
+        if response.status_code != 400:
+            self.log_test("Task Lifecycle Hardening", False, error_msg=f"Allowed Internal Approval='Approved' while Status='In Progress' (Status: {response.status_code})")
+            return False
+
+        # 2. Verify Auto-Revert: Set to Completed + Approved, then move back to In Progress
+        r1, _ = self.make_request("PUT", f"/tasks/{task_id}", {"status": "Completed"})
+        r2, _ = self.make_request("PUT", f"/tasks/{task_id}", {"internal_approval": "Approved"})
+        
+        # Move back to In Progress
+        r3, _ = self.make_request("PUT", f"/tasks/{task_id}", {"status": "In Progress"})
+        response, _ = self.make_request("GET", f"/tasks/{task_id}") 
+        task = response.json()
+        
+        # DEBUG
+        # print(f"DEBUG Lifecycle: step1={r1.status_code}, step2={r2.status_code}, step3={r3.status_code}")
+        # print(f"DEBUG Task State: {task}")
+
+        if task.get("internal_approval") != "Pending":
+            self.log_test("Task Lifecycle Hardening", False, error_msg=f"Internal Approval ({task.get('internal_approval')}) did not revert to Pending when status moved away from Completed (Steps: {r1.status_code},{r2.status_code},{r3.status_code})")
+            return False
+
+        # 3. Verify Link Visibility guard
+        update_data = {"client_link_visible": True}
+        response, _ = self.make_request("PUT", f"/tasks/{task_id}", update_data)
+        if response.status_code != 400:
+            self.log_test("Task Lifecycle Hardening", False, error_msg="Allowed Client Link Visible while not Approved/Completed")
+            return False
+
+        self.log_test("Task Lifecycle Hardening", True, "Successfully verified lifecycle guards and auto-reverts")
+        return True
+
+    def test_bulk_task_import(self):
+        """Test POST /api/tasks/bulk - New bulk import API"""
+        if not self.auth_token or not self.bandolier_client_id:
+            self.log_test("Bulk Task Import", False, error_msg="Prerequisites missing")
+            return False
+
+        bulk_data = {
+            "client_id": self.bandolier_client_id,
+            "tasks": [
+                {"title": "Bulk Task A", "category": "SEO"},
+                {"title": "Bulk Task B", "priority": "P1"},
+                {"title": "Bulk Task C", "status": "In Progress"}
+            ]
+        }
+
+        response, error = self.make_request("POST", "/tasks/bulk", bulk_data)
+        if error or response.status_code not in [200, 201]:
+            self.log_test("Bulk Task Import", False, error_msg=error or response.text)
+            return False
+
+        result = response.json()
+        if result.get("count") != 3:
+            self.log_test("Bulk Task Import", False, error_msg=f"Expected 3 imported tasks, got {result.get('count')}")
+            return False
+
+        self.log_test("Bulk Task Import", True, f"Successfully imported {result.get('count')} tasks via bulk API")
+        return True
+
+    def test_portal_security_with_password(self):
+        """Test portal endpoints with X-Portal-Password requirement"""
+        # Behno has password 'behno2025' in seed
+        response, _ = self.make_request("GET", "/portal/behno")
+        if response.status_code != 401:
+            self.log_test("Portal Security (Password)", False, error_msg="Behno portal did not return 401 without password")
+            return False
+
+        # Try with correct password header
+        headers = {"X-Portal-Password": "behno2025"}
+        response, _ = self.make_request("GET", "/portal/behno", headers=headers)
+        if response.status_code != 200:
+            self.log_test("Portal Security (Password)", False, error_msg=f"Behno portal failed with correct password: {response.status_code}")
+            return False
+
+        # Try with INCORRECT password
+        headers = {"X-Portal-Password": "wrong-password"}
+        response, _ = self.make_request("GET", "/portal/behno", headers=headers)
+        if response.status_code != 401:
+            self.log_test("Portal Security (Password)", False, error_msg="Behno portal allowed access with wrong password")
+            return False
+
+        self.log_test("Portal Security (Password)", True, "Successfully verified X-Portal-Password security requirement")
+        return True
+
     def test_delete_content_item(self):
         """Test DELETE /api/content/:id - Delete content item"""
         if not self.auth_token:
@@ -974,6 +1119,58 @@ class APITester:
             self.log_test("Delete Content Item", False, error_msg="Invalid JSON response")
             return False
 
+    def test_client_resources(self):
+        """Test Client Resources CRUD and Portal Exposure"""
+        if not self.auth_token:
+            self.log_test("Client Resources", False, error_msg="No auth token available")
+            return False
+            
+        test_client_id = "86c8c750-1fde-4d81-82c0-8c1ac89751dc" 
+        
+        # 1. Create Resource
+        res_data = {
+            "name": "Test Brand Logo",
+            "url": "https://example.com/logo.png",
+            "type": "image",
+            "category": "Branding"
+        }
+        response, error = self.make_request("POST", f"/clients/{test_client_id}/resources", res_data)
+        if error or response.status_code != 201:
+            self.log_test("Create Client Resource", False, error_msg=error or f"Status {response.status_code}")
+            return False
+        
+        resource = response.json()
+        res_id = resource['id']
+        self.log_test("Create Client Resource", True, f"Resource created: {res_id}")
+        
+        # 2. Update Resource
+        update_data = {"name": "Updated Brand Logo"}
+        response, error = self.make_request("PUT", f"/clients/{test_client_id}/resources/{res_id}", update_data)
+        if response.status_code != 200:
+            self.log_test("Update Client Resource", False, error_msg=f"Status {response.status_code}")
+            return False
+        self.log_test("Update Client Resource", True, "Resource updated successfully")
+        
+        # 3. Verify in Portal
+        response, error = self.make_request("GET", "/portal/client-1") 
+        if response.status_code == 200:
+            portal_data = response.json()
+            resources = portal_data.get('resources', [])
+            found = any(r['id'] == res_id for r in resources)
+            if not found:
+                self.log_test("Portal Resource Exposure", False, error_msg="Resource not found in portal payload")
+                return False
+            self.log_test("Portal Resource Exposure", True, "Resource visible in portal")
+        
+        # 4. Delete Resource
+        response, error = self.make_request("DELETE", f"/clients/{test_client_id}/resources/{res_id}")
+        if response.status_code != 200:
+            self.log_test("Delete Client Resource", False, error_msg=f"Status {response.status_code}")
+            return False
+        self.log_test("Delete Client Resource", True, "Resource deleted successfully")
+        
+        return True
+
     def run_all_tests(self):
         """Run all backend tests in sequence"""
         print("🚀 Starting Agency Dashboard Backend API Tests")
@@ -982,6 +1179,7 @@ class APITester:
         # Test sequence - order matters for dependencies
         tests = [
             self.test_seed_data,
+            self.test_register_user,
             self.test_auth_login,
             self.test_get_clients,
             self.test_create_client,
@@ -996,6 +1194,9 @@ class APITester:
             self.test_get_stats,
             self.test_portal_bandolier,
             self.test_portal_behno_password_protection,
+            self.test_portal_security_with_password,
+            self.test_task_lifecycle_hardening,
+            self.test_bulk_task_import,
             # Content Calendar Tests
             self.test_get_content_items_empty,
             self.test_create_content_item,
@@ -1006,6 +1207,7 @@ class APITester:
             self.test_bulk_import_content,
             self.test_portal_content_approval,
             self.test_delete_content_item,
+            self.test_client_resources,
         ]
         
         passed = 0

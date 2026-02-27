@@ -1,35 +1,17 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { apiFetch } from '@/lib/auth'
+import useSWR from 'swr'
+import { apiFetch, swrFetcher } from '@/lib/auth'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Users, CheckSquare, Clock, AlertTriangle, TrendingUp } from 'lucide-react'
-
-const statusColors = {
-  'Completed': 'bg-green-100 text-green-800',
-  'In Progress': 'bg-blue-100 text-blue-800',
-  'To Be Approved': 'bg-amber-100 text-amber-800',
-  'Blocked': 'bg-red-100 text-red-800',
-  'To Be Started': 'bg-gray-100 text-gray-700',
-  'Recurring': 'bg-purple-100 text-purple-800',
-}
+import { statusColors } from '@/lib/constants'
 
 export default function DashboardPage() {
-  const [stats, setStats] = useState(null)
-  const [loading, setLoading] = useState(true)
+  const { data: stats, error } = useSWR('/api/stats', swrFetcher)
 
-  useEffect(() => {
-    apiFetch('/api/stats')
-      .then(r => r.json())
-      .then(data => {
-        if (data && !data.error) setStats(data)
-        setLoading(false)
-      })
-      .catch(() => setLoading(false))
-  }, [])
-
-  if (loading) return (
+  if (!stats && !error) return (
     <div className="p-8 flex items-center justify-center">
       <div className="text-gray-400">Loading dashboard...</div>
     </div>
@@ -107,9 +89,8 @@ export default function DashboardPage() {
           <div className="divide-y divide-gray-50">
             {(stats?.recentActivity || []).slice(0, 15).map((task) => (
               <div key={task.id} className="flex items-center gap-4 px-6 py-3 hover:bg-gray-50 transition-colors">
-                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                  statusColors[task.status] || 'bg-gray-100 text-gray-700'
-                }`}>{task.status}</span>
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusColors[task.status] || 'bg-gray-100 text-gray-700'
+                  }`}>{task.status}</span>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-900 truncate">{task.title}</p>
                   <p className="text-xs text-gray-400">{task.client_name}</p>

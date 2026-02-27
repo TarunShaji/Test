@@ -3,7 +3,8 @@
 import { useEffect, useState, useRef } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { apiFetch } from '@/lib/auth'
+import useSWR, { mutate } from 'swr'
+import { apiFetch, swrFetcher } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -11,219 +12,116 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
-import { Plus, ExternalLink, Trash2, Link2, Settings, BarChart3, FileText } from 'lucide-react'
+import { EditableCell } from '@/components/EditableCell'
+import { LinkCell } from '@/components/LinkCell'
+import { Plus, ExternalLink, Trash2, Link2, Settings, BarChart3, FileText, GripVertical, GripHorizontal, Folder, Image, Library } from 'lucide-react'
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core'
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  horizontalListSortingStrategy,
+  useSortable,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import { restrictToHorizontalAxis, restrictToVerticalAxis } from '@dnd-kit/modifiers'
+import {
+  STATUSES, CATEGORIES, PRIORITIES, APPROVALS, INTERNAL_APPROVALS, REPORT_TYPES, SERVICE_TYPES,
+  OUTLINE_STATUSES, TOPIC_APPROVALS, BLOG_APPROVALS, BLOG_STATUSES,
+  statusColors, priorityColors, approvalColors, topicApprovalColors, blogStatusColors, internalApprovalColors
+} from '@/lib/constants'
 
-const STATUSES        = ['To Be Started', 'In Progress', 'To Be Approved', 'Completed', 'Recurring', 'Blocked']
-const CATEGORIES      = ['SEO & Content', 'Design', 'Development', 'Page Speed', 'Technical SEO', 'Link Building', 'Paid Ads', 'Email Marketing', 'LLM SEO', 'Reporting', 'Other']
-const PRIORITIES      = ['P0', 'P1', 'P2', 'P3']
-const APPROVALS       = ['Pending Review', 'Approved', 'Required Changes']
-const REPORT_TYPES    = ['Monthly SEO Report', 'Weekly Update', 'Audit Report', 'Ad Performance', 'Custom']
-const SERVICE_TYPES   = ['SEO', 'Email Marketing', 'Paid Ads', 'SEO + Email', 'SEO + Paid Ads', 'All']
-const OUTLINE_STATUSES = ['Pending', 'Submitted', 'Approved', 'Rejected']
-const TOPIC_APPROVALS  = ['Pending', 'Approved', 'Rejected']
-const BLOG_APPROVALS   = ['Pending Review', 'Approved', 'Changes Required']
-const BLOG_STATUSES    = ['Draft', 'In Progress', 'Sent for Approval', 'Published', 'Rejected']
-
-const statusColors = {
-  'Completed':      'bg-green-100 text-green-700 border-green-200',
-  'In Progress':    'bg-blue-100 text-blue-700 border-blue-200',
-  'To Be Approved': 'bg-amber-100 text-amber-700 border-amber-200',
-  'Blocked':        'bg-red-100 text-red-700 border-red-200',
-  'To Be Started':  'bg-gray-100 text-gray-600 border-gray-200',
-  'Recurring':      'bg-purple-100 text-purple-700 border-purple-200',
-}
-const priorityColors = {
-  'P0': 'bg-red-100 text-red-700',
-  'P1': 'bg-orange-100 text-orange-700',
-  'P2': 'bg-yellow-100 text-yellow-700',
-  'P3': 'bg-gray-100 text-gray-600',
-}
-const approvalColors = {
-  'Approved':          'bg-green-100 text-green-700 border-green-200',
-  'Required Changes':  'bg-red-100 text-red-700 border-red-200',
-  'Pending Review':    'bg-gray-100 text-gray-500 border-gray-200',
-}
-const topicApprovalColors = {
-  'Approved':  'bg-green-100 text-green-700 border-green-200',
-  'Rejected':  'bg-red-100 text-red-700 border-red-200',
-  'Pending':   'bg-gray-100 text-gray-500 border-gray-200',
-}
-const blogStatusColors = {
-  'Published':         'bg-green-100 text-green-700 border-green-200',
-  'Sent for Approval': 'bg-amber-100 text-amber-700 border-amber-200',
-  'In Progress':       'bg-blue-100 text-blue-700 border-blue-200',
-  'Draft':             'bg-gray-100 text-gray-600 border-gray-200',
-  'Rejected':          'bg-red-100 text-red-700 border-red-200',
-}
-
-// ── Inline editable cell ──────────────────────────────────────────────────────
-function EditableCell({ value, type = 'text', options = [], onSave, placeholder = '—' }) {
-  const [editing, setEditing] = useState(false)
-  const [val, setVal]         = useState(value || '')
-  const inputRef              = useRef(null)
-
-  useEffect(() => setVal(value || ''), [value])
-  useEffect(() => { if (editing && inputRef.current) inputRef.current.focus() }, [editing])
-
-  const save = () => { setEditing(false); if (val !== (value || '')) onSave(val) }
-
-  if (editing) {
-    if (type === 'select' || type === 'status' || type === 'priority' || type === 'approval') {
-      return (
-        <Select
-          value={val || '__none__'}
-          onValueChange={v => {
-            const real = v === '__none__' ? '' : v
-            setVal(real); setEditing(false)
-            if (real !== (value || '')) onSave(real)
-          }}
-        >
-          <SelectTrigger className="h-7 text-xs border-blue-400 min-w-[120px]"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__none__" className="text-xs text-gray-400">(none)</SelectItem>
-            {options.filter(o => o !== '').map(o => <SelectItem key={o} value={o} className="text-xs">{o}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      )
-    }
-    return (
-      <input
-        ref={inputRef}
-        type={type === 'date' ? 'date' : 'text'}
-        value={val}
-        onChange={e => setVal(e.target.value)}
-        onBlur={save}
-        onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') { setVal(value || ''); setEditing(false) } }}
-        className="w-full px-2 py-1 text-xs border border-blue-400 rounded shadow-sm bg-white focus:outline-none min-w-[80px]"
-        placeholder={placeholder}
-      />
-    )
-  }
-
-  const display = () => {
-    if (type === 'status') return (
-      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${statusColors[val] || 'bg-gray-100 text-gray-600 border-gray-200'}`}>
-        {val || <span className="text-gray-300">—</span>}
-      </span>
-    )
-    if (type === 'priority') return (
-      <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-semibold ${priorityColors[val] || 'bg-gray-100 text-gray-600'}`}>
-        {val || <span className="text-gray-300">—</span>}
-      </span>
-    )
-    if (type === 'approval') return (
-      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${approvalColors[val] || 'bg-gray-100 text-gray-500 border-gray-200'}`}>
-        {val || 'Pending Review'}
-      </span>
-    )
-    return <span className="text-xs text-gray-700">{val || <span className="text-gray-300">—</span>}</span>
-  }
-
-  return (
-    <div onClick={() => setEditing(true)}
-      className="cursor-pointer hover:bg-blue-50 hover:ring-1 hover:ring-blue-200 rounded px-1 py-0.5 min-h-[24px] min-w-[60px] transition-all"
-      title="Click to edit">
-      {display()}
-    </div>
-  )
-}
-
-// ── Link cell — shows icon when URL exists ────────────────────────────────────
-function LinkCell({ value, onSave }) {
-  const [editing, setEditing] = useState(false)
-  const [val, setVal]         = useState(value || '')
-  const inputRef              = useRef(null)
-
-  useEffect(() => setVal(value || ''), [value])
-  useEffect(() => { if (editing && inputRef.current) inputRef.current.focus() }, [editing])
-
-  const save = () => { setEditing(false); if (val !== (value || '')) onSave(val) }
-
-  if (editing) {
-    return (
-      <input
-        ref={inputRef}
-        type="url"
-        value={val}
-        onChange={e => setVal(e.target.value)}
-        onBlur={save}
-        onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') { setVal(value || ''); setEditing(false) } }}
-        className="w-full px-2 py-1 text-xs border border-blue-400 rounded bg-white focus:outline-none min-w-[140px]"
-        placeholder="https://..."
-      />
-    )
-  }
-
-  if (val) {
-    return (
-      <div className="flex items-center gap-1">
-        <a href={val} target="_blank" rel="noopener noreferrer"
-          onClick={e => e.stopPropagation()}
-          className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 text-xs font-medium transition-colors"
-          title={val}
-        >
-          <Link2 className="w-3 h-3" /> Open
-        </a>
-        <button onClick={() => setEditing(true)} className="text-gray-300 hover:text-gray-500 p-0.5 rounded">
-          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-        </button>
-      </div>
-    )
-  }
-
-  return (
-    <button onClick={() => setEditing(true)}
-      className="inline-flex items-center gap-1 text-xs text-gray-300 hover:text-blue-500 transition-colors px-1 py-0.5 rounded hover:bg-blue-50"
-      title="Add link">
-      <Link2 className="w-3 h-3" /> Add link
-    </button>
-  )
-}
+// Shared components imported from @/components/
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function ClientDetailPage() {
   const { id } = useParams()
-  const [client, setClient]       = useState(null)
-  const [tasks, setTasks]         = useState([])
-  const [reports, setReports]     = useState([])
-  const [content, setContent]     = useState([])
-  const [members, setMembers]     = useState([])
-  const [loading, setLoading]     = useState(true)
-  const [saving, setSaving]       = useState({})
-  const [newTask, setNewTask]     = useState({ title: '' })
+  const { data: client, mutate: mutateClient, error: clientErr } = useSWR(id ? `/api/clients/${id}` : null, swrFetcher)
+  const { data: tasks, mutate: mutateTasks } = useSWR(id ? `/api/tasks?client_id=${id}` : null, swrFetcher)
+  const { data: reports, mutate: mutateReports } = useSWR(id ? `/api/reports?client_id=${id}` : null, swrFetcher)
+  const { data: content, mutate: mutateContent } = useSWR(id ? `/api/content?client_id=${id}` : null, swrFetcher)
+  const { data: resources, mutate: mutateResources } = useSWR(id ? `/api/clients/${id}/resources` : null, swrFetcher)
+  const { data: members } = useSWR('/api/team', swrFetcher)
+
+  const [saving, setSaving] = useState({})
+  const [newTask, setNewTask] = useState({ title: '' })
   const [newContent, setNewContent] = useState({ blog_title: '' })
   const [addingTask, setAddingTask] = useState(false)
   const [addingContent, setAddingContent] = useState(false)
   const [showAddReport, setShowAddReport] = useState(false)
   const [reportForm, setReportForm] = useState({ title: '', report_type: 'Monthly SEO Report', report_url: '', report_date: '', notes: '' })
   const [showSettings, setShowSettings] = useState(false)
+  const [showAddResource, setShowAddResource] = useState(false)
+  const [resourceForm, setResourceForm] = useState({ name: '', url: '', type: 'link', category: 'Assets' })
   const [settingsForm, setSettingsForm] = useState({})
+  const [taskColOrder, setTaskColOrder] = useState([])
+  const [contentColOrder, setContentColOrder] = useState([])
+
+  useEffect(() => {
+    const savedTasks = localStorage.getItem('client_tasks_col_order')
+    if (savedTasks) setTaskColOrder(JSON.parse(savedTasks))
+    else setTaskColOrder(['selection', 'title', 'category', 'status', 'priority', 'eta', 'assigned', 'link', 'internal_approval', 'send_link', 'client_approval', 'client_feedback', 'actions'])
+
+    const savedContent = localStorage.getItem('client_content_col_order')
+    if (savedContent) setContentColOrder(JSON.parse(savedContent))
+    else setContentColOrder(['client_grip', 'week', 'title', 'keyword', 'writer', 'outline', 'topic_approval', 'blog_status', 'blog_approval', 'link', 'published', 'comments', 'actions'])
+  }, [])
   const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || ''
 
-  const loadData = async () => {
-    const [cr, tr, rr, mr, contr] = await Promise.all([
-      apiFetch(`/api/clients/${id}`),
-      apiFetch(`/api/tasks?client_id=${id}`),
-      apiFetch(`/api/reports?client_id=${id}`),
-      apiFetch('/api/team'),
-      apiFetch(`/api/content?client_id=${id}`),
-    ])
-    const [cd, td, rd, md, contd] = await Promise.all([cr.json(), tr.json(), rr.json(), mr.json(), contr.json()])
-    setClient(cd)
-    setSettingsForm(cd)
-    setTasks(Array.isArray(td) ? td : [])
-    setReports(Array.isArray(rd) ? rd : [])
-    setMembers(Array.isArray(md) ? md : [])
-    setContent(Array.isArray(contd) ? contd : [])
-    setLoading(false)
-  }
-
-  useEffect(() => { if (id) loadData() }, [id])
+  useEffect(() => {
+    if (client) setSettingsForm(client)
+  }, [client])
 
   const updateTask = async (taskId, field, value) => {
+    const task = (tasks || []).find(t => t.id === taskId)
+    if (!task) return
+
     setSaving(s => ({ ...s, [taskId]: true }))
-    setTasks(ts => ts.map(t => t.id === taskId ? { ...t, [field]: value } : t))
-    await apiFetch(`/api/tasks/${taskId}`, { method: 'PUT', body: JSON.stringify({ [field]: value }) })
+    const currentTasks = tasks || []
+    const updatedTasks = currentTasks.map(t => t.id === taskId ? { ...t, [field]: value } : t)
+    mutateTasks(updatedTasks, false)
+
+    try {
+      const res = await apiFetch(`/api/tasks/${taskId}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          [field]: value,
+          updated_at: task.updated_at // Send for optimistic locking
+        })
+      })
+
+      if (res.status === 409) {
+        const error = await res.json()
+        alert(error.error || 'Concurrency error: Task was modified by another user.')
+      }
+    } catch (e) {
+      console.error('Update failed', e)
+    }
+
+    mutateTasks()
+    setSaving(s => ({ ...s, [taskId]: false }))
+  }
+
+  const publishTask = async (taskId) => {
+    setSaving(s => ({ ...s, [taskId]: true }))
+    try {
+      const res = await apiFetch(`/api/tasks/${taskId}/publish`, { method: 'POST' })
+      if (!res.ok) {
+        const error = await res.json()
+        alert(error.error || 'Publish failed')
+      }
+    } catch (e) {
+      console.error('Publish failed', e)
+    }
+    mutateTasks()
     setSaving(s => ({ ...s, [taskId]: false }))
   }
 
@@ -231,44 +129,71 @@ export default function ClientDetailPage() {
     if (!newTask.title.trim()) return
     setAddingTask(true)
     const res = await apiFetch('/api/tasks', { method: 'POST', body: JSON.stringify({ ...newTask, client_id: id }) })
-    const task = await res.json()
-    setTasks(ts => [task, ...ts])
-    setNewTask({ title: '' })
+    if (res.ok) {
+      setNewTask({ title: '' })
+      mutateTasks()
+    }
     setAddingTask(false)
   }
 
   const deleteTask = async (taskId) => {
     if (!confirm('Delete this task?')) return
     await apiFetch(`/api/tasks/${taskId}`, { method: 'DELETE' })
-    setTasks(ts => ts.filter(t => t.id !== taskId))
+    mutateTasks()
   }
 
   const addReport = async (e) => {
     e.preventDefault()
     const res = await apiFetch('/api/reports', { method: 'POST', body: JSON.stringify({ ...reportForm, client_id: id }) })
-    const report = await res.json()
-    setReports(rs => [report, ...rs])
-    setShowAddReport(false)
-    setReportForm({ title: '', report_type: 'Monthly SEO Report', report_url: '', report_date: '', notes: '' })
+    if (res.ok) {
+      mutateReports()
+      setShowAddReport(false)
+      setReportForm({ title: '', report_type: 'Monthly SEO Report', report_url: '', report_date: '', notes: '' })
+    }
   }
 
   const saveSettings = async (e) => {
     e.preventDefault()
     await apiFetch(`/api/clients/${id}`, { method: 'PUT', body: JSON.stringify(settingsForm) })
-    setClient(settingsForm)
+    mutateClient()
     setShowSettings(false)
   }
 
   const deleteReport = async (reportId) => {
     if (!confirm('Delete this report?')) return
     await apiFetch(`/api/reports/${reportId}`, { method: 'DELETE' })
-    setReports(rs => rs.filter(r => r.id !== reportId))
+    mutateReports()
+  }
+
+  const addResource = async (e) => {
+    e.preventDefault()
+    const res = await apiFetch(`/api/clients/${id}/resources`, { method: 'POST', body: JSON.stringify(resourceForm) })
+    if (res.ok) {
+      mutateResources()
+      setShowAddResource(false)
+      setResourceForm({ name: '', url: '', type: 'link', category: 'Assets' })
+    }
+  }
+
+  const deleteResource = async (resId) => {
+    if (!confirm('Delete this resource?')) return
+    await apiFetch(`/api/clients/${id}/resources/${resId}`, { method: 'DELETE' })
+    mutateResources()
+  }
+
+  const updateResource = async (resId, field, value) => {
+    await apiFetch(`/api/clients/${id}/resources/${resId}`, { method: 'PUT', body: JSON.stringify({ [field]: value }) })
+    mutateResources()
   }
 
   const updateContent = async (contentId, field, value) => {
     setSaving(s => ({ ...s, [`c_${contentId}`]: true }))
-    setContent(cs => cs.map(c => c.id === contentId ? { ...c, [field]: value } : c))
+    const currentContent = content || []
+    const updatedContent = currentContent.map(c => c.id === contentId ? { ...c, [field]: value } : c)
+    mutateContent(updatedContent, false)
+
     await apiFetch(`/api/content/${contentId}`, { method: 'PUT', body: JSON.stringify({ [field]: value }) })
+    mutateContent()
     setSaving(s => ({ ...s, [`c_${contentId}`]: false }))
   }
 
@@ -276,26 +201,254 @@ export default function ClientDetailPage() {
     if (!newContent.blog_title.trim()) return
     setAddingContent(true)
     const res = await apiFetch('/api/content', { method: 'POST', body: JSON.stringify({ ...newContent, client_id: id }) })
-    const item = await res.json()
-    setContent(cs => [item, ...cs])
-    setNewContent({ blog_title: '' })
+    if (res.ok) {
+      mutateContent()
+      setNewContent({ blog_title: '' })
+    }
     setAddingContent(false)
   }
 
   const deleteContent = async (contentId) => {
     if (!confirm('Delete this content item?')) return
     await apiFetch(`/api/content/${contentId}`, { method: 'DELETE' })
-    setContent(cs => cs.filter(c => c.id !== contentId))
+    mutateContent()
   }
 
-  const completedTasks = tasks.filter(t => t.status === 'Completed').length
-  const progress       = tasks.length > 0 ? Math.round((completedTasks / tasks.length) * 100) : 0
-  const memberMap      = Object.fromEntries(members.map(m => [m.id, m.name]))
-  const approvalCount  = tasks.filter(t => t.client_approval === 'Approved').length
-  const changesCount   = tasks.filter(t => t.client_approval === 'Required Changes').length
+  const allTasks = tasks || []
+  const allReports = reports || []
+  const allContent = content || []
+  const allResources = resources || []
+  const allMembers = members || []
+  const completedTasks = allTasks.filter(t => t.status === 'Completed').length
+  const progress = allTasks.length > 0 ? Math.round((completedTasks / allTasks.length) * 100) : 0
+  const memberMap = Object.fromEntries(allMembers.map(m => [m.id, m.name]))
+  const approvalCount = allTasks.filter(t => t.client_approval === 'Approved').length
+  const changesCount = allTasks.filter(t => t.client_approval === 'Required Changes').length
 
-  if (loading) return <div className="p-8 text-gray-400">Loading...</div>
-  if (!client)  return <div className="p-8 text-gray-400">Client not found</div>
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  )
+
+  const handleTaskRowDragEnd = (event) => {
+    const { active, over } = event
+    if (active.id !== over.id) {
+      const oldIndex = allTasks.findIndex((t) => t.id === active.id)
+      const newIndex = allTasks.findIndex((t) => t.id === over.id)
+      mutateTasks(arrayMove(allTasks, oldIndex, newIndex), false)
+    }
+  }
+
+  const handleTaskColDragEnd = (event) => {
+    const { active, over } = event
+    if (active.id !== over.id) {
+      setTaskColOrder((items) => {
+        const oldIndex = items.indexOf(active.id)
+        const newIndex = items.indexOf(over.id)
+        const updated = arrayMove(items, oldIndex, newIndex)
+        localStorage.setItem('client_tasks_col_order', JSON.stringify(updated))
+        return updated
+      })
+    }
+  }
+
+  const handleContentRowDragEnd = (event) => {
+    const { active, over } = event
+    if (active.id !== over.id) {
+      const oldIndex = allContent.findIndex((c) => c.id === active.id)
+      const newIndex = allContent.findIndex((c) => c.id === over.id)
+      mutateContent(arrayMove(allContent, oldIndex, newIndex), false)
+    }
+  }
+
+  const handleContentColDragEnd = (event) => {
+    const { active, over } = event
+    if (active.id !== over.id) {
+      setContentColOrder((items) => {
+        const oldIndex = items.indexOf(active.id)
+        const newIndex = items.indexOf(over.id)
+        const updated = arrayMove(items, oldIndex, newIndex)
+        localStorage.setItem('client_content_col_order', JSON.stringify(updated))
+        return updated
+      })
+    }
+  }
+
+  if (!client && !clientErr) return <div className="p-8 text-gray-400">Loading...</div>
+  if (!client || clientErr) return <div className="p-8 text-gray-400">Client not found</div>
+
+  // --- Sortable Components ---
+  const SortableHeader = ({ id, label, sortField: sField, handleSort }) => {
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
+    const style = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 20 : 0 }
+    return (
+      <th ref={setNodeRef} style={style} className={`text-left px-3 py-2.5 font-semibold text-gray-600 bg-gray-50 border-r border-gray-100 last:border-0 ${isDragging ? 'opacity-50' : ''}`}>
+        <div className="flex items-center gap-2">
+          <div {...attributes} {...listeners} className="cursor-grab hover:text-blue-500">
+            <GripHorizontal className="w-3 h-3" />
+          </div>
+          <span>{label}</span>
+        </div>
+      </th>
+    )
+  }
+
+  const TaskSortableRow = ({ task }) => {
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id })
+    const style = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 20 : 0 }
+    return (
+      <tr ref={setNodeRef} style={style} className={`hover:bg-gray-50 group border-b border-gray-100 ${isDragging ? 'opacity-50 shadow-lg' : ''}`}>
+        {taskColOrder.map(colId => (
+          <td key={colId} className={`px-3 py-1.5 ${colId === 'internal_approval' || colId === 'send_link' ? 'bg-gray-50/50' : ''}`}>
+            {colId === 'selection' && (
+              <div className="flex items-center gap-2">
+                <div {...attributes} {...listeners} className="cursor-grab text-gray-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <GripVertical className="w-3 h-3" />
+                </div>
+                {saving[task.id] && <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse mx-auto" />}
+              </div>
+            )}
+            {colId === 'title' && <EditableCell value={task.title} onSave={v => updateTask(task.id, 'title', v)} />}
+            {colId === 'category' && <EditableCell value={task.category} type="select" options={CATEGORIES} onSave={v => updateTask(task.id, 'category', v)} />}
+            {colId === 'status' && <EditableCell value={task.status} type="status" options={STATUSES} onSave={v => updateTask(task.id, 'status', v)} />}
+            {colId === 'priority' && <EditableCell value={task.priority} type="priority" options={PRIORITIES} onSave={v => updateTask(task.id, 'priority', v)} />}
+            {colId === 'eta' && <EditableCell value={task.eta_end} type="date" onSave={v => updateTask(task.id, 'eta_end', v)} />}
+            {colId === 'assigned' && (
+              <EditableCell
+                value={memberMap[task.assigned_to] || ''}
+                type="select"
+                options={allMembers.map(m => m.name)}
+                onSave={v => {
+                  const member = allMembers.find(m => m.name === v)
+                  updateTask(task.id, 'assigned_to', member?.id || null)
+                }}
+              />
+            )}
+            {colId === 'link' && <LinkCell value={task.link_url} onSave={v => updateTask(task.id, 'link_url', v)} />}
+            {colId === 'internal_approval' && (
+              <EditableCell
+                value={task.internal_approval || 'Pending'}
+                type="internal_approval"
+                options={INTERNAL_APPROVALS}
+                disabled={task.status !== 'Completed'}
+                onSave={v => updateTask(task.id, 'internal_approval', v)}
+              />
+            )}
+            {colId === 'send_link' && (
+              <Button
+                size="sm"
+                variant={task.client_link_visible ? "ghost" : "default"}
+                className={`h-7 px-2 text-[10px] uppercase tracking-wider font-bold ${task.client_link_visible ? 'text-green-600' : ''}`}
+                disabled={
+                  task.status !== 'Completed' ||
+                  task.internal_approval !== 'Approved' ||
+                  !task.link_url ||
+                  task.client_link_visible === true
+                }
+                onClick={() => publishTask(task.id)}
+              >
+                {task.client_link_visible ? 'Sent' : 'Send Link'}
+              </Button>
+            )}
+            {colId === 'client_approval' && <EditableCell value={task.client_approval} type="approval" disabled={true} />}
+            {colId === 'client_feedback' && (
+              <div className="max-w-[150px]">
+                {task.client_approval === 'Required Changes' ? (
+                  <div className="text-[10px] text-red-600 bg-red-50 p-1 rounded border border-red-100 line-clamp-2" title={task.client_feedback_note}>
+                    {task.client_feedback_note}
+                  </div>
+                ) : <span className="text-gray-300 text-xs">—</span>}
+              </div>
+            )}
+            {colId === 'actions' && (
+              <button onClick={() => deleteTask(task.id)} className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-50 text-red-400 transition-all">
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </td>
+        ))}
+      </tr>
+    )
+  }
+
+  const ContentSortableRow = ({ item }) => {
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id })
+    const style = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 20 : 0 }
+    return (
+      <tr ref={setNodeRef} style={style} className={`hover:bg-gray-50 group border-b border-gray-100 ${isDragging ? 'opacity-50 shadow-lg' : ''}`}>
+        {contentColOrder.map(colId => (
+          <td key={colId} className="px-3 py-1.5">
+            {colId === 'client_grip' && (
+              <div className="flex items-center gap-2">
+                <div {...attributes} {...listeners} className="cursor-grab text-gray-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <GripVertical className="w-3 h-3" />
+                </div>
+                {saving[`c_${item.id}`] && <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse mx-auto" />}
+              </div>
+            )}
+            {colId === 'week' && <EditableCell value={item.week} onSave={v => updateContent(item.id, 'week', v)} placeholder="Week 1" />}
+            {colId === 'title' && <EditableCell value={item.blog_title} onSave={v => updateContent(item.id, 'blog_title', v)} />}
+            {colId === 'keyword' && <EditableCell value={item.primary_keyword} onSave={v => updateContent(item.id, 'primary_keyword', v)} placeholder="keyword" />}
+            {colId === 'writer' && <EditableCell value={item.writer} onSave={v => updateContent(item.id, 'writer', v)} placeholder="Writer" />}
+            {colId === 'outline' && <EditableCell value={item.outline_status} type="select" options={OUTLINE_STATUSES} onSave={v => updateContent(item.id, 'outline_status', v)} />}
+            {colId === 'topic_approval' && (
+              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border cursor-pointer hover:ring-1 hover:ring-blue-200 ${topicApprovalColors[item.topic_approval_status] || 'bg-gray-100 text-gray-500 border-gray-200'}`}
+                onClick={() => {
+                  const opts = TOPIC_APPROVALS
+                  const idx = opts.indexOf(item.topic_approval_status || 'Pending')
+                  const next = opts[(idx + 1) % opts.length]
+                  updateContent(item.id, 'topic_approval_status', next)
+                }}>
+                {item.topic_approval_status || 'Pending'}
+              </span>
+            )}
+            {colId === 'blog_status' && (
+              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border cursor-pointer hover:ring-1 hover:ring-blue-200 ${blogStatusColors[item.blog_status] || 'bg-gray-100 text-gray-600 border-gray-200'}`}
+                onClick={() => {
+                  const opts = BLOG_STATUSES
+                  const idx = opts.indexOf(item.blog_status || 'Draft')
+                  const next = opts[(idx + 1) % opts.length]
+                  updateContent(item.id, 'blog_status', next)
+                }}>
+                {item.blog_status || 'Draft'}
+              </span>
+            )}
+            {colId === 'blog_approval' && (
+              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border cursor-pointer hover:ring-1 hover:ring-blue-200 ${approvalColors[item.blog_approval_status] || 'bg-gray-100 text-gray-500 border-gray-200'}`}
+                onClick={() => {
+                  const opts = BLOG_APPROVALS
+                  const idx = opts.indexOf(item.blog_approval_status || 'Pending Review')
+                  const next = opts[(idx + 1) % opts.length]
+                  updateContent(item.id, 'blog_approval_status', next)
+                }}>
+                {item.blog_approval_status || 'Pending Review'}
+              </span>
+            )}
+            {colId === 'link' && <LinkCell value={item.blog_link} onSave={v => updateContent(item.id, 'blog_link', v)} />}
+            {colId === 'published' && <EditableCell value={item.published_date} type="date" onSave={v => updateContent(item.id, 'published_date', v)} />}
+            {colId === 'comments' && <EditableCell value={item.comments} onSave={v => updateContent(item.id, 'comments', v)} placeholder="Notes..." />}
+            {colId === 'actions' && (
+              <button onClick={() => deleteContent(item.id)} className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-50 text-red-400 transition-all">
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </td>
+        ))}
+      </tr>
+    )
+  }
+
+  const taskColLabels = {
+    selection: '', title: 'Task', category: 'Category', status: 'Status', priority: 'Priority',
+    eta: 'ETA End', assigned: 'Assigned', link: 'Link', internal_approval: 'Internal Approval',
+    send_link: 'Send Link', client_approval: 'Client Approval', client_feedback: 'Client Feedback', actions: ''
+  }
+
+  const contentColLabels = {
+    client_grip: '', week: 'Week', title: 'Blog Title', keyword: 'Primary Keyword', writer: 'Writer',
+    outline: 'Outline Status', topic_approval: 'Topic Approval', blog_status: 'Blog Status',
+    blog_approval: 'Blog Approval', link: 'Blog Link', published: 'Published', comments: 'Comments', actions: ''
+  }
 
   return (
     <div className="p-6">
@@ -311,7 +464,7 @@ export default function ClientDetailPage() {
           <div className="flex items-center gap-3 mt-1">
             <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">{client.service_type}</span>
             <a href={`${BASE_URL}/portal/${client.slug}`} target="_blank" rel="noopener noreferrer"
-               className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800">
+              className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800">
               Portal Link <ExternalLink className="w-3 h-3" />
             </a>
           </div>
@@ -326,7 +479,7 @@ export default function ClientDetailPage() {
         <div className="md:col-span-2 bg-white border border-gray-200 rounded-lg p-4">
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm font-medium text-gray-700">Overall Progress</span>
-            <span className="text-sm text-gray-500">{completedTasks}/{tasks.length} completed</span>
+            <span className="text-sm text-gray-500">{completedTasks}/{allTasks.length} completed</span>
           </div>
           <div className="w-full bg-gray-100 rounded-full h-2">
             <div className="bg-blue-500 h-2 rounded-full transition-all" style={{ width: `${progress}%` }} />
@@ -343,7 +496,7 @@ export default function ClientDetailPage() {
             <div className="text-xs text-gray-400 mt-0.5">Changes Req.</div>
           </div>
           <div className="text-center flex-1">
-            <div className="text-2xl font-bold text-gray-400">{tasks.filter(t => !t.client_approval || t.client_approval === 'Pending Review').length}</div>
+            <div className="text-2xl font-bold text-gray-400">{allTasks.filter(t => !t.client_approval || t.client_approval === 'Pending Review').length}</div>
             <div className="text-xs text-gray-400 mt-0.5">Pending</div>
           </div>
         </div>
@@ -353,231 +506,169 @@ export default function ClientDetailPage() {
         <TabsList className="mb-4">
           <TabsTrigger value="timeline">Timeline Tracker</TabsTrigger>
           <TabsTrigger value="content" className="gap-1">
-            <FileText className="w-3.5 h-3.5" /> Content Calendar {content.length > 0 && `(${content.length})`}
+            <FileText className="w-3.5 h-3.5" /> Content Calendar {allContent.length > 0 && `(${allContent.length})`}
+          </TabsTrigger>
+          <TabsTrigger value="resources" className="gap-1">
+            <Library className="w-3.5 h-3.5" /> Resources {allResources.length > 0 && `(${allResources.length})`}
           </TabsTrigger>
           <TabsTrigger value="reports" className="gap-1">
-            <BarChart3 className="w-3.5 h-3.5" /> Reports {reports.length > 0 && `(${reports.length})`}
+            <BarChart3 className="w-3.5 h-3.5" /> Reports {allReports.length > 0 && `(${allReports.length})`}
           </TabsTrigger>
         </TabsList>
 
         {/* ── Timeline Tab ───────────────────────────────────────────────── */}
         <TabsContent value="timeline">
-          <div className="bg-white border border-gray-200 rounded-lg overflow-auto">
-            <table className="w-full text-sm" style={{ minWidth: '1100px' }}>
-              <thead>
-                <tr className="border-b border-gray-100 bg-gray-50 sticky top-0 z-10">
-                  <th className="w-5 px-2 py-2.5"></th>
-                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600" style={{ minWidth: 200 }}>Task</th>
-                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Category</th>
-                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Duration</th>
-                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Status</th>
-                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Priority</th>
-                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600">ETA Start</th>
-                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600">ETA End</th>
-                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Assigned</th>
-                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Client Approval</th>
-                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Link / Doc</th>
-                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Remarks</th>
-                  <th className="px-2 py-2.5 w-6"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {tasks.map(task => (
-                  <tr key={task.id} className="hover:bg-gray-50 group">
-                    <td className="px-2 py-1.5">
-                      {saving[task.id] && <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse mx-auto" />}
-                    </td>
-                    <td className="px-3 py-1.5">
-                      <EditableCell value={task.title} onSave={v => updateTask(task.id, 'title', v)} />
-                    </td>
-                    <td className="px-3 py-1.5">
-                      <EditableCell value={task.category} type="select" options={CATEGORIES} onSave={v => updateTask(task.id, 'category', v)} />
-                    </td>
-                    <td className="px-3 py-1.5">
-                      <EditableCell value={task.duration_days} onSave={v => updateTask(task.id, 'duration_days', v)} placeholder="e.g. 3-5" />
-                    </td>
-                    <td className="px-3 py-1.5">
-                      <EditableCell value={task.status} type="status" options={STATUSES} onSave={v => updateTask(task.id, 'status', v)} />
-                    </td>
-                    <td className="px-3 py-1.5">
-                      <EditableCell value={task.priority} type="priority" options={PRIORITIES} onSave={v => updateTask(task.id, 'priority', v)} />
-                    </td>
-                    <td className="px-3 py-1.5">
-                      <EditableCell value={task.eta_start} type="date" onSave={v => updateTask(task.id, 'eta_start', v)} />
-                    </td>
-                    <td className="px-3 py-1.5">
-                      <EditableCell value={task.eta_end} type="date" onSave={v => updateTask(task.id, 'eta_end', v)} />
-                    </td>
-                    <td className="px-3 py-1.5">
-                      <EditableCell
-                        value={memberMap[task.assigned_to] || ''}
-                        type="select"
-                        options={members.map(m => m.name)}
-                        onSave={v => {
-                          const member = members.find(m => m.name === v)
-                          updateTask(task.id, 'assigned_to', member?.id || null)
-                        }}
+          <div className="bg-white border border-gray-200 rounded-lg overflow-auto shadow-sm">
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleTaskColDragEnd} modifiers={[restrictToHorizontalAxis]}>
+              <table className="w-full text-sm" style={{ minWidth: '1200px', tableLayout: 'fixed' }}>
+                <thead>
+                  <SortableContext items={taskColOrder} strategy={horizontalListSortingStrategy}>
+                    <tr className="border-b border-gray-100 bg-gray-50/80 sticky top-0 z-10">
+                      {taskColOrder.map(colId => (
+                        <SortableHeader key={colId} id={colId} label={taskColLabels[colId]} />
+                      ))}
+                    </tr>
+                  </SortableContext>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {allTasks.length === 0 ? (
+                    <tr>
+                      <td colSpan={taskColOrder.length} className="px-4 py-16 text-center text-gray-400">
+                        No tasks yet. Add your first task below.
+                      </td>
+                    </tr>
+                  ) : (
+                    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleTaskRowDragEnd} modifiers={[restrictToVerticalAxis]}>
+                      <SortableContext items={allTasks.map(t => t.id)} strategy={verticalListSortingStrategy}>
+                        {allTasks.map(task => <TaskSortableRow key={task.id} task={task} />)}
+                      </SortableContext>
+                    </DndContext>
+                  )}
+                  {/* Add row */}
+                  <tr className="bg-gray-50/30 border-t border-dashed border-gray-200">
+                    <td className="px-2 py-2"></td>
+                    <td className="px-3 py-2" colSpan={2}>
+                      <input
+                        type="text" value={newTask.title}
+                        onChange={e => setNewTask(n => ({ ...n, title: e.target.value }))}
+                        onKeyDown={e => e.key === 'Enter' && addTask()}
+                        placeholder="+ Add a task..."
+                        className="w-full text-xs px-2 py-1 bg-transparent border border-dashed border-gray-300 rounded focus:outline-none focus:border-blue-400 focus:bg-white"
+                        disabled={addingTask}
                       />
                     </td>
-                    <td className="px-3 py-1.5">
-                      <EditableCell value={task.client_approval || 'Pending Review'} type="approval" options={APPROVALS} onSave={v => updateTask(task.id, 'client_approval', v)} />
-                    </td>
-                    <td className="px-3 py-1.5">
-                      <LinkCell value={task.link_url} onSave={v => updateTask(task.id, 'link_url', v)} />
-                    </td>
-                    <td className="px-3 py-1.5">
-                      <EditableCell value={task.remarks} onSave={v => updateTask(task.id, 'remarks', v)} placeholder="Notes..." />
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <button onClick={() => deleteTask(task.id)}
-                        className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-50 text-red-400 transition-all">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                    <td colSpan={taskColOrder.length - 3} className="px-3 py-2 text-right">
+                      <Button size="sm" variant="ghost" onClick={addTask} disabled={addingTask || !newTask.title.trim()} className="text-xs h-7">
+                        <Plus className="w-3 h-3 mr-1" />{addingTask ? 'Adding...' : 'Add'}
+                      </Button>
                     </td>
                   </tr>
-                ))}
-                {/* Add row */}
-                <tr className="bg-gray-50 border-t border-dashed border-gray-200">
-                  <td className="px-2 py-2"></td>
-                  <td className="px-3 py-2" colSpan={2}>
-                    <input
-                      type="text" value={newTask.title}
-                      onChange={e => setNewTask(n => ({ ...n, title: e.target.value }))}
-                      onKeyDown={e => e.key === 'Enter' && addTask()}
-                      placeholder="+ Add a task..."
-                      className="w-full text-xs px-2 py-1 bg-transparent border border-dashed border-gray-300 rounded focus:outline-none focus:border-blue-400 focus:bg-white"
-                      disabled={addingTask}
-                    />
-                  </td>
-                  <td colSpan={11} className="px-3 py-2">
-                    <Button size="sm" variant="ghost" onClick={addTask} disabled={addingTask || !newTask.title.trim()} className="text-xs h-7">
-                      <Plus className="w-3 h-3 mr-1" />{addingTask ? 'Adding...' : 'Add'}
-                    </Button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+                </tbody>
+              </table>
+            </DndContext>
           </div>
         </TabsContent>
 
         {/* ── Content Calendar Tab ─────────────────────────────────────────── */}
         <TabsContent value="content">
-          <div className="bg-white border border-gray-200 rounded-lg overflow-auto">
-            <table className="w-full text-sm" style={{ minWidth: '1400px' }}>
-              <thead>
-                <tr className="border-b border-gray-100 bg-gray-50 sticky top-0 z-10">
-                  <th className="w-5 px-2 py-2.5"></th>
-                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600" style={{ minWidth: 60 }}>Week</th>
-                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600" style={{ minWidth: 200 }}>Blog Title</th>
-                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600" style={{ minWidth: 120 }}>Primary Keyword</th>
-                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Writer</th>
-                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Outline Status</th>
-                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Topic Approval</th>
-                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Blog Status</th>
-                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Blog Approval</th>
-                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Blog Link</th>
-                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Published</th>
-                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Comments</th>
-                  <th className="px-2 py-2.5 w-6"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {content.map(item => (
-                  <tr key={item.id} className="hover:bg-gray-50 group">
-                    <td className="px-2 py-1.5">
-                      {saving[`c_${item.id}`] && <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse mx-auto" />}
+          <div className="bg-white border border-gray-200 rounded-lg overflow-auto shadow-sm">
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleContentColDragEnd} modifiers={[restrictToHorizontalAxis]}>
+              <table className="w-full text-sm" style={{ minWidth: '1400px', tableLayout: 'fixed' }}>
+                <thead>
+                  <SortableContext items={contentColOrder} strategy={horizontalListSortingStrategy}>
+                    <tr className="border-b border-gray-100 bg-gray-50/80 sticky top-0 z-10">
+                      {contentColOrder.map(colId => (
+                        <SortableHeader key={colId} id={colId} label={contentColLabels[colId]} />
+                      ))}
+                    </tr>
+                  </SortableContext>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {allContent.length === 0 ? (
+                    <tr>
+                      <td colSpan={contentColOrder.length} className="px-4 py-16 text-center text-gray-400">
+                        <FileText className="w-8 h-8 mx-auto mb-2 text-gray-200" />
+                        No content calendar items yet. Add your first blog post below.
+                      </td>
+                    </tr>
+                  ) : (
+                    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleContentRowDragEnd} modifiers={[restrictToVerticalAxis]}>
+                      <SortableContext items={allContent.map(i => i.id)} strategy={verticalListSortingStrategy}>
+                        {allContent.map(item => <ContentSortableRow key={item.id} item={item} />)}
+                      </SortableContext>
+                    </DndContext>
+                  )}
+                  {/* Add row */}
+                  <tr className="bg-gray-50/30 border-t border-dashed border-gray-200">
+                    <td className="px-2 py-2"></td>
+                    <td className="px-3 py-2" colSpan={2}>
+                      <input
+                        type="text" value={newContent.blog_title}
+                        onChange={e => setNewContent(n => ({ ...n, blog_title: e.target.value }))}
+                        onKeyDown={e => e.key === 'Enter' && addContent()}
+                        placeholder="+ Add a blog post..."
+                        className="w-full text-xs px-2 py-1 bg-transparent border border-dashed border-gray-300 rounded focus:outline-none focus:border-blue-400 focus:bg-white"
+                        disabled={addingContent}
+                      />
                     </td>
-                    <td className="px-3 py-1.5">
-                      <EditableCell value={item.week} onSave={v => updateContent(item.id, 'week', v)} placeholder="Week 1" />
-                    </td>
-                    <td className="px-3 py-1.5">
-                      <EditableCell value={item.blog_title} onSave={v => updateContent(item.id, 'blog_title', v)} />
-                    </td>
-                    <td className="px-3 py-1.5">
-                      <EditableCell value={item.primary_keyword} onSave={v => updateContent(item.id, 'primary_keyword', v)} placeholder="keyword" />
-                    </td>
-                    <td className="px-3 py-1.5">
-                      <EditableCell value={item.writer} onSave={v => updateContent(item.id, 'writer', v)} placeholder="Writer" />
-                    </td>
-                    <td className="px-3 py-1.5">
-                      <EditableCell value={item.outline_status} type="select" options={OUTLINE_STATUSES} onSave={v => updateContent(item.id, 'outline_status', v)} />
-                    </td>
-                    <td className="px-3 py-1.5">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border cursor-pointer hover:ring-1 hover:ring-blue-200 ${topicApprovalColors[item.topic_approval_status] || 'bg-gray-100 text-gray-500 border-gray-200'}`}
-                        onClick={() => {
-                          const opts = TOPIC_APPROVALS
-                          const idx = opts.indexOf(item.topic_approval_status || 'Pending')
-                          const next = opts[(idx + 1) % opts.length]
-                          updateContent(item.id, 'topic_approval_status', next)
-                        }}>
-                        {item.topic_approval_status || 'Pending'}
-                      </span>
-                    </td>
-                    <td className="px-3 py-1.5">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border cursor-pointer hover:ring-1 hover:ring-blue-200 ${blogStatusColors[item.blog_status] || 'bg-gray-100 text-gray-600 border-gray-200'}`}
-                        onClick={() => {
-                          const opts = BLOG_STATUSES
-                          const idx = opts.indexOf(item.blog_status || 'Draft')
-                          const next = opts[(idx + 1) % opts.length]
-                          updateContent(item.id, 'blog_status', next)
-                        }}>
-                        {item.blog_status || 'Draft'}
-                      </span>
-                    </td>
-                    <td className="px-3 py-1.5">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border cursor-pointer hover:ring-1 hover:ring-blue-200 ${approvalColors[item.blog_approval_status] || 'bg-gray-100 text-gray-500 border-gray-200'}`}
-                        onClick={() => {
-                          const opts = BLOG_APPROVALS
-                          const idx = opts.indexOf(item.blog_approval_status || 'Pending Review')
-                          const next = opts[(idx + 1) % opts.length]
-                          updateContent(item.id, 'blog_approval_status', next)
-                        }}>
-                        {item.blog_approval_status || 'Pending Review'}
-                      </span>
-                    </td>
-                    <td className="px-3 py-1.5">
-                      <LinkCell value={item.blog_link} onSave={v => updateContent(item.id, 'blog_link', v)} />
-                    </td>
-                    <td className="px-3 py-1.5">
-                      <EditableCell value={item.published_date} type="date" onSave={v => updateContent(item.id, 'published_date', v)} />
-                    </td>
-                    <td className="px-3 py-1.5">
-                      <EditableCell value={item.comments} onSave={v => updateContent(item.id, 'comments', v)} placeholder="Notes..." />
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <button onClick={() => deleteContent(item.id)}
-                        className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-50 text-red-400 transition-all">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                    <td colSpan={contentColOrder.length - 3} className="px-3 py-2 text-right">
+                      <Button size="sm" variant="ghost" onClick={addContent} disabled={addingContent || !newContent.blog_title.trim()} className="text-xs h-7">
+                        <Plus className="w-3 h-3 mr-1" />{addingContent ? 'Adding...' : 'Add'}
+                      </Button>
                     </td>
                   </tr>
-                ))}
-                {/* Add row */}
-                <tr className="bg-gray-50 border-t border-dashed border-gray-200">
-                  <td className="px-2 py-2"></td>
-                  <td className="px-3 py-2" colSpan={2}>
-                    <input
-                      type="text" value={newContent.blog_title}
-                      onChange={e => setNewContent(n => ({ ...n, blog_title: e.target.value }))}
-                      onKeyDown={e => e.key === 'Enter' && addContent()}
-                      placeholder="+ Add a blog post..."
-                      className="w-full text-xs px-2 py-1 bg-transparent border border-dashed border-gray-300 rounded focus:outline-none focus:border-blue-400 focus:bg-white"
-                      disabled={addingContent}
-                    />
-                  </td>
-                  <td colSpan={11} className="px-3 py-2">
-                    <Button size="sm" variant="ghost" onClick={addContent} disabled={addingContent || !newContent.blog_title.trim()} className="text-xs h-7">
-                      <Plus className="w-3 h-3 mr-1" />{addingContent ? 'Adding...' : 'Add'}
-                    </Button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+                </tbody>
+              </table>
+            </DndContext>
           </div>
-          {content.length === 0 && (
-            <div className="text-center py-12 text-gray-400 bg-white border border-gray-200 rounded-lg mt-2">
-              <FileText className="w-8 h-8 mx-auto mb-2 text-gray-200" />
-              No content calendar items yet. Add your first blog post above.
+        </TabsContent>
+
+        {/* ── Resources Tab ────────────────────────────────────────────── */}
+        <TabsContent value="resources">
+          <div className="flex justify-end mb-4">
+            <Button onClick={() => setShowAddResource(true)} size="sm" className="gap-1">
+              <Plus className="w-4 h-4" /> Add Resource
+            </Button>
+          </div>
+          {allResources.length === 0 ? (
+            <div className="text-center py-12 text-gray-400">
+              <Library className="w-8 h-8 mx-auto mb-2 text-gray-200" />
+              No resources yet. Add logos, brand guides, or media links.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {allResources.map(res => (
+                <Card key={res.id} className="border border-gray-200 hover:shadow-md transition-shadow group">
+                  <CardContent className="p-4">
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600 flex-shrink-0">
+                        {res.type === 'image' ? <Image className="w-5 h-5" /> :
+                          res.type === 'folder' ? <Folder className="w-5 h-5" /> :
+                            <Link2 className="w-5 h-5" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between mb-0.5">
+                          <span className="text-[10px] uppercase tracking-wider font-bold text-gray-400">{res.category || 'Asset'}</span>
+                          <button onClick={() => deleteResource(res.id)} className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-50 text-gray-300 hover:text-red-400 transition-all">
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                        <p className="font-semibold text-gray-900 text-sm truncate">{res.name}</p>
+                        <p className="text-xs text-gray-400 truncate mt-0.5">
+                          {(() => {
+                            try { return new URL(res.url).hostname }
+                            catch { return 'resource link' }
+                          })()}
+                        </p>
+                        <a href={res.url} target="_blank" rel="noopener noreferrer"
+                          className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-900 text-white rounded text-xs font-medium hover:bg-gray-800 transition-colors w-full justify-center">
+                          Open Resource <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
             </div>
           )}
         </TabsContent>
@@ -589,14 +680,14 @@ export default function ClientDetailPage() {
               <Plus className="w-4 h-4" /> Add Report
             </Button>
           </div>
-          {reports.length === 0 ? (
+          {allReports.length === 0 ? (
             <div className="text-center py-12 text-gray-400">
               <BarChart3 className="w-8 h-8 mx-auto mb-2 text-gray-200" />
               No reports yet.
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {reports.map(report => (
+              {allReports.map(report => (
                 <Card key={report.id} className="border border-gray-200 hover:shadow-md transition-shadow">
                   <CardContent className="p-4">
                     <div className="flex items-start justify-between">
@@ -611,7 +702,7 @@ export default function ClientDetailPage() {
                       </button>
                     </div>
                     <a href={report.report_url} target="_blank" rel="noopener noreferrer"
-                       className="mt-3 inline-flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700">
+                      className="mt-3 inline-flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700">
                       View Report <ExternalLink className="w-3 h-3" />
                     </a>
                   </CardContent>
@@ -623,6 +714,46 @@ export default function ClientDetailPage() {
       </Tabs>
 
       {/* Dialogs */}
+      <Dialog open={showAddResource} onOpenChange={setShowAddResource}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Add Resource</DialogTitle></DialogHeader>
+          <form onSubmit={addResource} className="space-y-3">
+            <div>
+              <Label>Name</Label>
+              <Input value={resourceForm.name} onChange={e => setResourceForm(f => ({ ...f, name: e.target.value }))} required placeholder="Primary Logo - Vector" className="mt-1" />
+            </div>
+            <div>
+              <Label>Resource URL</Label>
+              <Input value={resourceForm.url} onChange={e => setResourceForm(f => ({ ...f, url: e.target.value }))} required placeholder="https://drive.google.com/..." className="mt-1" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Type</Label>
+                <Select value={resourceForm.type} onValueChange={v => setResourceForm(f => ({ ...f, type: v }))}>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {['link', 'image', 'video', 'folder'].map(t => <SelectItem key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Category</Label>
+                <Select value={resourceForm.category} onValueChange={v => setResourceForm(f => ({ ...f, category: v }))}>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {['Assets', 'Branding', 'Media Library', 'Other'].map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setShowAddResource(false)}>Cancel</Button>
+              <Button type="submit">Add Resource</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={showAddReport} onOpenChange={setShowAddReport}>
         <DialogContent>
           <DialogHeader><DialogTitle>Add Report</DialogTitle></DialogHeader>

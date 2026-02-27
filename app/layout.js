@@ -8,14 +8,18 @@ export const metadata = {
   description: 'Internal dashboard and client portal for marketing agencies',
 }
 
+import { SWRProvider } from '@/components/SWRProvider'
+
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <head>
-        <script dangerouslySetInnerHTML={{__html:'window.addEventListener("error",function(e){if(e.error instanceof DOMException&&e.error.name==="DataCloneError"){e.stopImmediatePropagation();e.preventDefault()}},true);'}} />
+        <script dangerouslySetInnerHTML={{ __html: 'window.addEventListener("error",function(e){if(e.error instanceof DOMException&&e.error.name==="DataCloneError"){e.stopImmediatePropagation();e.preventDefault()}},true);' }} />
       </head>
       <body className={inter.className}>
-        {children}
+        <SWRProvider>
+          {children}
+        </SWRProvider>
       </body>
     </html>
   )

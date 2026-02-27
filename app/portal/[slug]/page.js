@@ -6,66 +6,68 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { ExternalLink, BarChart3, CheckCircle2, Loader2, Lock, ChevronDown, ChevronRight, Link2, FileText } from 'lucide-react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { ExternalLink, BarChart3, CheckCircle2, Loader2, Lock, ChevronDown, ChevronRight, Link2, FileText, Library, Folder, Image } from 'lucide-react'
 
-const statusColors = {
-  'Completed':      'bg-green-100 text-green-700 border-green-200',
-  'In Progress':    'bg-blue-100 text-blue-700 border-blue-200',
-  'To Be Approved': 'bg-amber-100 text-amber-700 border-amber-200',
-  'Blocked':        'bg-red-100 text-red-700 border-red-200',
-  'To Be Started':  'bg-gray-100 text-gray-600 border-gray-200',
-  'Recurring':      'bg-purple-100 text-purple-700 border-purple-200',
-}
-const approvalColors = {
-  'Approved':         'bg-green-500 text-white hover:bg-green-600',
-  'Required Changes': 'bg-red-500 text-white hover:bg-red-600',
-  'Pending Review':   'bg-gray-100 text-gray-600 hover:bg-gray-200 border border-gray-200',
-}
-const approvalBadge = {
-  'Approved':         'bg-green-100 text-green-700 border-green-200',
-  'Required Changes': 'bg-red-100 text-red-700 border-red-200',
-  'Pending Review':   'bg-gray-100 text-gray-500 border-gray-200',
-}
-const topicApprovalColors = {
-  'Approved':  'bg-green-500 text-white hover:bg-green-600',
-  'Rejected':  'bg-red-500 text-white hover:bg-red-600',
-  'Pending':   'bg-gray-100 text-gray-600 hover:bg-gray-200 border border-gray-200',
-}
-const blogStatusColors = {
-  'Published':         'bg-green-100 text-green-700 border-green-200',
-  'Sent for Approval': 'bg-amber-100 text-amber-700 border-amber-200',
-  'In Progress':       'bg-blue-100 text-blue-700 border-blue-200',
-  'Draft':             'bg-gray-100 text-gray-600 border-gray-200',
-  'Rejected':          'bg-red-100 text-red-700 border-red-200',
-}
+import useSWR, { mutate } from 'swr'
+import {
+  statusColors, approvalColors, topicApprovalColors, blogStatusColors,
+  APPROVALS, TOPIC_APPROVALS, BLOG_APPROVALS
+} from '@/lib/constants'
+
 const typeColors = {
   'Monthly SEO Report': 'bg-blue-50 text-blue-700',
-  'Weekly Update':      'bg-green-50 text-green-700',
-  'Audit Report':       'bg-purple-50 text-purple-700',
-  'Ad Performance':     'bg-orange-50 text-orange-700',
-  'Custom':             'bg-gray-50 text-gray-600',
+  'Weekly Update': 'bg-green-50 text-green-700',
+  'Audit Report': 'bg-purple-50 text-purple-700',
+  'Ad Performance': 'bg-orange-50 text-orange-700',
+  'Custom': 'bg-gray-50 text-gray-600',
 }
 
-const APPROVAL_OPTIONS = ['Pending Review', 'Approved', 'Required Changes']
-const TOPIC_APPROVAL_OPTIONS = ['Pending', 'Approved', 'Rejected']
-const BLOG_APPROVAL_OPTIONS = ['Pending Review', 'Approved', 'Changes Required']
+const APPROVAL_OPTIONS = APPROVALS
+const TOPIC_APPROVAL_OPTIONS = TOPIC_APPROVALS
+const BLOG_APPROVAL_OPTIONS = BLOG_APPROVALS
 
-function ApprovalButton({ taskId, current, slug, onUpdate }) {
-  const [loading, setLoading]   = useState(false)
-  const [open, setOpen]         = useState(false)
+function ApprovalButton({ taskId, current, slug, portalPassword, disabled, onUpdate }) {
+  const [loading, setLoading] = useState(false)
+  const [showNote, setShowNote] = useState(false)
+  const [note, setNote] = useState('')
+  const [pendingChoice, setPendingChoice] = useState(null)
   const val = current || 'Pending Review'
 
   const set = async (choice) => {
-    setOpen(false)
-    if (choice === val) return
+    if (choice === current) return
+
+    if (choice === 'Required Changes') {
+      setPendingChoice(choice)
+      setShowNote(true)
+      return
+    }
+
+    await submit(choice)
+  }
+
+  const submit = async (choice, feedbackNote = '') => {
     setLoading(true)
     try {
+      const headers = { 'Content-Type': 'application/json' }
+      if (portalPassword) headers['X-Portal-Password'] = portalPassword
+
       const res = await fetch(`/api/portal/${slug}/tasks/${taskId}/approval`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ client_approval: choice }),
+        headers,
+        body: JSON.stringify({
+          client_approval: choice,
+          client_feedback_note: feedbackNote
+        }),
       })
-      if (res.ok) onUpdate(taskId, choice)
+      if (res.ok) {
+        onUpdate(taskId, choice)
+        setShowNote(false)
+        setNote('')
+      } else {
+        const err = await res.json()
+        alert(err.error || 'Failed to update approval')
+      }
     } finally {
       setLoading(false)
     }
@@ -73,54 +75,65 @@ function ApprovalButton({ taskId, current, slug, onUpdate }) {
 
   return (
     <div className="relative">
-      <button
-        onClick={() => setOpen(o => !o)}
-        disabled={loading}
-        className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all whitespace-nowrap ${approvalColors[val]}`}
-      >
-        {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
-        {val}
-        <ChevronDown className="w-3 h-3 opacity-60" />
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full mt-1 z-20 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden min-w-[160px]">
-            {APPROVAL_OPTIONS.map(opt => (
-              <button
-                key={opt}
-                onClick={() => set(opt)}
-                className={`w-full text-left px-3 py-2 text-xs font-medium hover:bg-gray-50 flex items-center gap-2 transition-colors ${val === opt ? 'bg-gray-50' : ''}`}
-              >
-                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                  opt === 'Approved' ? 'bg-green-500' :
-                  opt === 'Required Changes' ? 'bg-red-500' : 'bg-gray-300'
-                }`} />
+      <Select value={val} onValueChange={set} disabled={loading || disabled}>
+        <SelectTrigger className={`h-8 text-xs rounded-full border ring-offset-0 focus:ring-1 focus:ring-blue-400 ${approvalColors[val]}`}>
+          {loading ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {APPROVAL_OPTIONS.map(opt => (
+            <SelectItem key={opt} value={opt} className="text-xs text-gray-700">
+              <span className="flex items-center gap-2">
+                <span className={`w-2 h-2 rounded-full ${opt === 'Approved' ? 'bg-green-500' : opt === 'Required Changes' ? 'bg-red-500' : 'bg-gray-300'}`} />
                 {opt}
-                {val === opt && <span className="ml-auto text-gray-400">✓</span>}
-              </button>
-            ))}
-          </div>
-        </>
+              </span>
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
+      {showNote && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <Card className="w-full max-w-sm shadow-2xl">
+            <CardContent className="p-6">
+              <h3 className="text-sm font-bold text-gray-900 mb-2">Required Changes</h3>
+              <p className="text-xs text-gray-500 mb-4">Please provide feedback so the team can address your concerns.</p>
+              <textarea
+                autoFocus
+                value={note}
+                onChange={e => setNote(e.target.value)}
+                placeholder="Describe what needs to be changed..."
+                className="w-full h-24 text-xs p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent mb-4 resize-none"
+              />
+              <div className="flex gap-2">
+                <Button variant="ghost" size="sm" className="flex-1 text-xs" onClick={() => { setShowNote(false); setNote(''); }}>Cancel</Button>
+                <Button size="sm" className="flex-1 text-xs bg-red-600 hover:bg-red-700" onClick={() => submit(pendingChoice, note)} disabled={!note.trim() || loading}>
+                  {loading ? 'Submitting...' : 'Submit Feedback'}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       )}
     </div>
   )
 }
 
 // Topic approval button for content calendar
-function TopicApprovalButton({ contentId, current, slug, onUpdate }) {
+function TopicApprovalButton({ contentId, current, slug, portalPassword, onUpdate }) {
   const [loading, setLoading] = useState(false)
-  const [open, setOpen] = useState(false)
   const val = current || 'Pending'
 
   const set = async (choice) => {
-    setOpen(false)
-    if (choice === val) return
+    if (choice === current) return
     setLoading(true)
     try {
+      const headers = { 'Content-Type': 'application/json' }
+      if (portalPassword) headers['X-Portal-Password'] = portalPassword
+
       const res = await fetch(`/api/portal/${slug}/content/${contentId}/approval`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ topic_approval_status: choice }),
       })
       if (res.ok) onUpdate(contentId, 'topic_approval_status', choice)
@@ -131,54 +144,41 @@ function TopicApprovalButton({ contentId, current, slug, onUpdate }) {
 
   return (
     <div className="relative">
-      <button
-        onClick={() => setOpen(o => !o)}
-        disabled={loading}
-        className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all whitespace-nowrap ${topicApprovalColors[val]}`}
-      >
-        {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
-        {val}
-        <ChevronDown className="w-3 h-3 opacity-60" />
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full mt-1 z-20 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden min-w-[140px]">
-            {TOPIC_APPROVAL_OPTIONS.map(opt => (
-              <button
-                key={opt}
-                onClick={() => set(opt)}
-                className={`w-full text-left px-3 py-2 text-xs font-medium hover:bg-gray-50 flex items-center gap-2 transition-colors ${val === opt ? 'bg-gray-50' : ''}`}
-              >
-                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                  opt === 'Approved' ? 'bg-green-500' :
-                  opt === 'Rejected' ? 'bg-red-500' : 'bg-gray-300'
-                }`} />
+      <Select value={val} onValueChange={set} disabled={loading}>
+        <SelectTrigger className={`h-8 text-xs rounded-full border ring-offset-0 focus:ring-1 focus:ring-blue-400 ${topicApprovalColors[val]}`}>
+          {loading ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {TOPIC_APPROVAL_OPTIONS.map(opt => (
+            <SelectItem key={opt} value={opt} className="text-xs">
+              <span className="flex items-center gap-2">
+                <span className={`w-2 h-2 rounded-full ${opt === 'Approved' ? 'bg-green-500' : opt === 'Rejected' ? 'bg-red-500' : 'bg-gray-300'}`} />
                 {opt}
-                {val === opt && <span className="ml-auto text-gray-400">✓</span>}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
+              </span>
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   )
 }
 
 // Blog approval button for content calendar
-function BlogApprovalButton({ contentId, current, slug, onUpdate }) {
+function BlogApprovalButton({ contentId, current, slug, portalPassword, onUpdate }) {
   const [loading, setLoading] = useState(false)
-  const [open, setOpen] = useState(false)
   const val = current || 'Pending Review'
 
   const set = async (choice) => {
-    setOpen(false)
-    if (choice === val) return
+    if (choice === current) return
     setLoading(true)
     try {
+      const headers = { 'Content-Type': 'application/json' }
+      if (portalPassword) headers['X-Portal-Password'] = portalPassword
+
       const res = await fetch(`/api/portal/${slug}/content/${contentId}/approval`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ blog_approval_status: choice }),
       })
       if (res.ok) onUpdate(contentId, 'blog_approval_status', choice)
@@ -189,87 +189,89 @@ function BlogApprovalButton({ contentId, current, slug, onUpdate }) {
 
   return (
     <div className="relative">
-      <button
-        onClick={() => setOpen(o => !o)}
-        disabled={loading}
-        className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all whitespace-nowrap ${approvalColors[val]}`}
-      >
-        {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
-        {val}
-        <ChevronDown className="w-3 h-3 opacity-60" />
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full mt-1 z-20 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden min-w-[160px]">
-            {BLOG_APPROVAL_OPTIONS.map(opt => (
-              <button
-                key={opt}
-                onClick={() => set(opt)}
-                className={`w-full text-left px-3 py-2 text-xs font-medium hover:bg-gray-50 flex items-center gap-2 transition-colors ${val === opt ? 'bg-gray-50' : ''}`}
-              >
-                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                  opt === 'Approved' ? 'bg-green-500' :
-                  opt === 'Changes Required' ? 'bg-red-500' : 'bg-gray-300'
-                }`} />
+      <Select value={val} onValueChange={set} disabled={loading}>
+        <SelectTrigger className={`h-8 text-xs rounded-full border ring-offset-0 focus:ring-1 focus:ring-blue-400 ${approvalColors[val]}`}>
+          {loading ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {BLOG_APPROVAL_OPTIONS.map(opt => (
+            <SelectItem key={opt} value={opt} className="text-xs">
+              <span className="flex items-center gap-2">
+                <span className={`w-2 h-2 rounded-full ${opt === 'Approved' ? 'bg-green-500' : opt === 'Changes Required' ? 'bg-red-500' : 'bg-gray-300'}`} />
                 {opt}
-                {val === opt && <span className="ml-auto text-gray-400">✓</span>}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
+              </span>
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   )
 }
 
 export default function ClientPortalPage() {
   const { slug } = useParams()
-  const [data, setData]                       = useState(null)
-  const [loading, setLoading]                 = useState(true)
-  const [error, setError]                     = useState(null)
-  const [needsPassword, setNeedsPassword]     = useState(false)
-  const [password, setPassword]               = useState('')
-  const [passwordError, setPasswordError]     = useState('')
-  const [clientName, setClientName]           = useState('')
-  const [collapsed, setCollapsed]             = useState({})
-  const [tasks, setTasks]                     = useState([])
-  const [content, setContent]                 = useState([])
-  const [portalPassword, setPortalPassword]   = useState(null)
+  const [password, setPassword] = useState('')
+  const [portalPassword, setPortalPassword] = useState('')
+  const [passwordError, setPasswordError] = useState('')
+  const [collapsed, setCollapsed] = useState({})
 
-  const fetchPortal = async (pwd = null) => {
+  const portalFetcher = async ([url, slug, pwd]) => {
     const headers = { 'Content-Type': 'application/json' }
     if (pwd) headers['X-Portal-Password'] = pwd
-    const res  = await fetch(`/api/portal/${slug}`, { headers })
+    const res = await fetch(`${url}/${slug}`, { headers })
     const json = await res.json()
-    if (res.status === 401 && json.has_password) {
-      setNeedsPassword(true); setClientName(json.client_name || ''); setLoading(false); return
+    if (!res.ok) {
+      const err = new Error(json.error || 'Failed to fetch')
+      err.status = res.status
+      err.info = json
+      throw err
     }
-    if (!res.ok) { setError(json.error || 'Failed to load portal'); setLoading(false); return }
-    setData(json)
-    setTasks(json.tasks || [])
-    setContent(json.content || [])
-    setNeedsPassword(false)
-    setLoading(false)
-    if (pwd) setPortalPassword(pwd)
+    return json
   }
 
-  useEffect(() => { if (slug) fetchPortal() }, [slug])
+  const { data, error: swrErr, isValidating } = useSWR(
+    slug ? ['/api/portal', slug, portalPassword] : null,
+    portalFetcher,
+    { shouldRetryOnError: false, revalidateOnFocus: false }
+  )
+
+  const tasks = data?.tasks || []
+  const content = data?.content || []
+  const client = data?.client
+  const reports = data?.reports || []
+  const resources = data?.resources || []
+
+  const loading = isValidating && !data
+  const needsPassword = swrErr?.status === 401 && swrErr?.info?.has_password
+  const clientName = swrErr?.info?.client_name || ''
+  const error = swrErr?.status !== 401 ? swrErr?.message : null
 
   const handlePasswordSubmit = async (e) => {
-    e.preventDefault(); setPasswordError(''); setLoading(true)
-    await fetchPortal(password)
-    setLoading(false)
-    if (needsPassword) setPasswordError('Incorrect password')
+    e.preventDefault()
+    setPasswordError('')
+    setPortalPassword(password)
   }
 
-  const handleApprovalUpdate = (taskId, newApproval) => {
-    setTasks(ts => ts.map(t => t.id === taskId ? { ...t, client_approval: newApproval } : t))
+  useEffect(() => {
+    if (swrErr?.status === 401 && portalPassword) {
+      setPasswordError('Incorrect password')
+    }
+  }, [swrErr, portalPassword])
+
+  const handleUpdate = (type, id, field, val) => {
+    mutate(['/api/portal', slug, portalPassword], (current) => {
+      if (!current) return current
+      if (type === 'task') {
+        return { ...current, tasks: current.tasks.map(t => t.id === id ? { ...t, [field]: val } : t) }
+      } else {
+        return { ...current, content: current.content.map(c => c.id === id ? { ...c, [field]: val } : c) }
+      }
+    }, false)
   }
 
-  const handleContentApprovalUpdate = (contentId, field, value) => {
-    setContent(cs => cs.map(c => c.id === contentId ? { ...c, [field]: value } : c))
-  }
+  const handleApprovalUpdate = (taskId, val) => handleUpdate('task', taskId, 'client_approval', val)
+  const handleContentApprovalUpdate = (contentId, field, val) => handleUpdate('content', contentId, field, val)
 
   const toggleCategory = (cat) => setCollapsed(c => ({ ...c, [cat]: !c[cat] }))
 
@@ -314,12 +316,12 @@ export default function ClientPortalPage() {
   )
   if (!data) return null
 
-  const { client, reports } = data
-  const completed  = tasks.filter(t => t.status === 'Completed').length
-  const progress   = tasks.length > 0 ? Math.round((completed / tasks.length) * 100) : 0
-  const approved   = tasks.filter(t => t.client_approval === 'Approved').length
-  const changes    = tasks.filter(t => t.client_approval === 'Required Changes').length
-  const pending    = tasks.filter(t => !t.client_approval || t.client_approval === 'Pending Review').length
+  // data is already destructured into client and reports above
+  const completed = tasks.filter(t => t.status === 'Completed').length
+  const progress = tasks.length > 0 ? Math.round((completed / tasks.length) * 100) : 0
+  const approved = tasks.filter(t => t.client_approval === 'Approved').length
+  const changes = tasks.filter(t => t.client_approval === 'Required Changes').length
+  const pending = tasks.filter(t => !t.client_approval || t.client_approval === 'Pending Review').length
 
   const byCategory = tasks.reduce((acc, task) => {
     const cat = task.category || 'Other'
@@ -390,6 +392,9 @@ export default function ClientPortalPage() {
             <TabsTrigger value="content" className="gap-1.5">
               <FileText className="w-4 h-4" /> Content Calendar {content.length > 0 && `(${content.length})`}
             </TabsTrigger>
+            <TabsTrigger value="resources" className="gap-1.5">
+              <Library className="w-4 h-4" /> Resources {resources.length > 0 && `(${resources.length})`}
+            </TabsTrigger>
             <TabsTrigger value="reports" className="gap-1.5">
               <BarChart3 className="w-4 h-4" /> Reports {reports.length > 0 && `(${reports.length})`}
             </TabsTrigger>
@@ -400,7 +405,7 @@ export default function ClientPortalPage() {
             {/* Legend */}
             <div className="flex items-center gap-4 mb-4 px-1">
               <p className="text-xs text-gray-500 mr-2">Your approval:</p>
-              {[['Approved','bg-green-500'],['Required Changes','bg-red-500'],['Pending Review','bg-gray-300']].map(([l,c]) => (
+              {[['Approved', 'bg-green-500'], ['Required Changes', 'bg-red-500'], ['Pending Review', 'bg-gray-300']].map(([l, c]) => (
                 <span key={l} className="flex items-center gap-1 text-xs text-gray-500">
                   <span className={`w-2 h-2 rounded-full ${c}`} />{l}
                 </span>
@@ -412,7 +417,7 @@ export default function ClientPortalPage() {
             ) : (
               <div className="space-y-3">
                 {Object.entries(byCategory).map(([category, catTasks]) => (
-                  <div key={category} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                  <div key={category} className="bg-white rounded-xl border border-gray-200 overflow-visible">
                     <button className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-gray-50 transition-colors" onClick={() => toggleCategory(category)}>
                       <div className="flex items-center gap-2.5">
                         {collapsed[category] ? <ChevronRight className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
@@ -428,7 +433,7 @@ export default function ClientPortalPage() {
                           <tr className="bg-gray-50">
                             <th className="text-left px-5 py-2 text-xs font-semibold text-gray-500">Task</th>
                             <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500">Status</th>
-                            <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500">ETA</th>
+                            <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500">ETA End</th>
                             <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500">Notes</th>
                             <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500">Link</th>
                             <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500">Your Approval</th>
@@ -436,28 +441,36 @@ export default function ClientPortalPage() {
                         </thead>
                         <tbody className="divide-y divide-gray-50">
                           {catTasks.map(task => (
-                            <tr key={task.id} className="hover:bg-gray-50">
-                              <td className="px-5 py-2.5 font-medium text-gray-800 text-sm">{task.title}</td>
-                              <td className="px-4 py-2.5">
-                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${statusColors[task.status] || 'bg-gray-100 text-gray-600 border-gray-200'}`}>
+                            <tr key={task.id} className="hover:bg-gray-50 transition-colors border-b border-gray-50 last:border-0">
+                              <td className="px-5 py-4 font-medium text-gray-800 text-sm">{task.title}</td>
+                              <td className="px-4 py-4">
+                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${statusColors[task.status] || 'bg-gray-100 text-gray-600 border-gray-200'}`}>
                                   {task.status}
                                 </span>
                               </td>
-                              <td className="px-4 py-2.5 text-xs text-gray-500">{task.eta_end || '—'}</td>
-                              <td className="px-4 py-2.5 text-xs text-gray-500 max-w-[160px]">{task.remarks || '—'}</td>
-                              <td className="px-4 py-2.5">
-                                {task.link_url ? (
-                                  <a href={task.link_url} target="_blank" rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 text-xs font-medium transition-colors">
-                                    <Link2 className="w-3 h-3" /> Open
-                                  </a>
-                                ) : <span className="text-gray-300 text-xs">—</span>}
+                              <td className="px-4 py-4 text-xs text-gray-500">{task.eta_end || '—'}</td>
+                              <td className="px-4 py-4 text-xs text-gray-500 max-w-[160px] italic">
+                                {task.client_approval === 'Required Changes' ? task.client_feedback_note : (task.remarks || '—')}
                               </td>
-                              <td className="px-4 py-2.5">
+                              <td className="px-4 py-4 text-center">
+                                {task.client_link_visible && task.link_url ? (
+                                  <a href={task.link_url} target="_blank" rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white text-xs font-bold transition-all shadow-sm">
+                                    <Link2 className="w-3.5 h-3.5" /> View
+                                  </a>
+                                ) : (
+                                  <div className="inline-flex items-center gap-1.5 text-gray-300 text-[10px] font-bold uppercase tracking-widest">
+                                    <Lock className="w-3 h-3" /> Pending Review
+                                  </div>
+                                )}
+                              </td>
+                              <td className="px-4 py-4">
                                 <ApprovalButton
                                   taskId={task.id}
                                   current={task.client_approval}
                                   slug={slug}
+                                  portalPassword={portalPassword}
+                                  disabled={!task.client_link_visible}
                                   onUpdate={handleApprovalUpdate}
                                 />
                               </td>
@@ -520,6 +533,7 @@ export default function ClientPortalPage() {
                             contentId={item.id}
                             current={item.topic_approval_status}
                             slug={slug}
+                            portalPassword={portalPassword}
                             onUpdate={handleContentApprovalUpdate}
                           />
                         </td>
@@ -528,6 +542,7 @@ export default function ClientPortalPage() {
                             contentId={item.id}
                             current={item.blog_approval_status}
                             slug={slug}
+                            portalPassword={portalPassword}
                             onUpdate={handleContentApprovalUpdate}
                           />
                         </td>
@@ -537,7 +552,7 @@ export default function ClientPortalPage() {
                 </table>
               </div>
             )}
-            
+
             {/* Legend for content approvals */}
             {content.length > 0 && (
               <div className="flex items-center gap-6 mt-4 px-1">
@@ -553,6 +568,46 @@ export default function ClientPortalPage() {
                     <span className="w-2 h-2 rounded-full bg-gray-300" />Pending
                   </span>
                 </div>
+              </div>
+            )}
+          </TabsContent>
+
+          {/* ── Resources Tab ────────────────────────────────────────────── */}
+          <TabsContent value="resources">
+            {resources.length === 0 ? (
+              <div className="text-center py-16">
+                <Library className="w-10 h-10 text-gray-200 mx-auto mb-3" />
+                <p className="text-gray-400">No resources shared yet.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {resources.map(res => (
+                  <Card key={res.id} className="border border-gray-200 hover:shadow-md transition-all">
+                    <CardContent className="p-5">
+                      <div className="flex items-start gap-4">
+                        <div className="w-12 h-12 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600 flex-shrink-0">
+                          {res.type === 'image' ? <Image className="w-6 h-6" /> :
+                            res.type === 'folder' ? <Folder className="w-6 h-6" /> :
+                              <Link2 className="w-6 h-6" />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <span className="text-[10px] uppercase tracking-widest font-bold text-gray-400 block mb-1">{res.category || 'Asset'}</span>
+                          <h3 className="font-bold text-gray-900 truncate">{res.name}</h3>
+                          <p className="text-xs text-gray-400 truncate mt-0.5">
+                            {(() => {
+                              try { return new URL(res.url).hostname }
+                              catch { return 'resource' }
+                            })()}
+                          </p>
+                          <a href={res.url} target="_blank" rel="noopener noreferrer"
+                            className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors w-full justify-center shadow-sm">
+                            View Resource <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
               </div>
             )}
           </TabsContent>
@@ -576,7 +631,7 @@ export default function ClientPortalPage() {
                       <p className="text-sm text-gray-400 mt-0.5">{report.report_date}</p>
                       {report.notes && <p className="text-sm text-gray-500 mt-2">{report.notes}</p>}
                       <a href={report.report_url} target="_blank" rel="noopener noreferrer"
-                         className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
+                        className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
                         View Report <ExternalLink className="w-3.5 h-3.5" />
                       </a>
                     </CardContent>

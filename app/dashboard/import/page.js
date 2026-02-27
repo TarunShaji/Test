@@ -1,7 +1,8 @@
 'use client'
-
 import { useState, useEffect } from 'react'
-import { apiFetch } from '@/lib/auth'
+import { parse, isValid, format } from 'date-fns'
+import useSWR from 'swr'
+import { apiFetch, swrFetcher } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -21,13 +22,51 @@ const STATUS_MAP = {
 }
 function mapStatus(s) { return s ? (STATUS_MAP[s.toLowerCase().trim()] || 'To Be Started') : 'To Be Started' }
 
+function flexibleParseDate(str) {
+  if (!str) return null
+  const s = str.trim()
+  if (!s) return null
+
+  // Common spreadsheet formats
+  const formats = [
+    'yyyy-MM-dd',
+    'dd-MM-yyyy',
+    'MM-dd-yyyy',
+    'dd/MM/yyyy',
+    'MM/dd/yyyy',
+    'MMM d, yyyy',
+    'MMMM d, yyyy',
+    'yyyy/MM/dd',
+    'd-M-yyyy',
+    'M-d-yyyy',
+    'd/M/yyyy',
+    'M/d/yyyy'
+  ]
+
+  for (const f of formats) {
+    try {
+      const d = parse(s, f, new Date())
+      if (isValid(d)) return format(d, 'yyyy-MM-dd')
+    } catch (e) { }
+  }
+
+  const native = new Date(s)
+  if (!isNaN(native.getTime())) return format(native, 'yyyy-MM-dd')
+
+  return null
+}
+
 function parseCSV(text) {
-  const lines = text.split('\n').filter(l => l.trim())
+  if (!text || !text.trim()) return null
+  const lines = text.split(/\r?\n/).filter(l => l.trim())
   if (lines.length < 2) return null
   const sep = text.includes('\t') ? '\t' : ','
-  const headers = lines[0].split(sep).map(h => h.trim().replace(/^"|"$/g, '').toLowerCase())
+  // Clean headers: lower, no quotes, no extra spaces
+  const headers = lines[0].split(sep).map(h => h.trim().replace(/^["']|["']$/g, '').toLowerCase())
+  if (headers.length === 0) return null
+
   const rows = lines.slice(1).map(line => {
-    const vals = line.split(sep).map(v => v.trim().replace(/^"|"$/g, ''))
+    const vals = line.split(sep).map(v => v.trim().replace(/^["']|["']$/g, ''))
     return Object.fromEntries(headers.map((h, i) => [h, vals[i] || '']))
   }).filter(r => Object.values(r).some(v => v))
   return { headers, rows }
@@ -35,15 +74,16 @@ function parseCSV(text) {
 
 function rowToTask(row, headers, clientId) {
   const h = (keywords) => headers.find(h => keywords.some(k => h.includes(k))) || ''
-  const titleField = h(['to-do', 'todo', 'task', 'title', 'name']) || headers[0]
+  const titleField = h(['to-do', 'todo', 'task', 'title', 'name', 'action item', 'item', 'description']) || headers[0]
+
   return {
     client_id: clientId,
     title: row[titleField] || '',
     status: mapStatus(row[h(['status'])] || ''),
-    category: row[h(['category', 'type'])] || 'Other',
-    duration_days: row[h(['duration', 'days'])] || '',
-    remarks: row[h(['remark', 'note', 'comment'])] || '',
-    eta_end: row[h(['eta', 'due', 'deadline', 'date'])] || null,
+    category: row[h(['category', 'type', 'group', 'industry'])] || 'Other',
+    duration_days: row[h(['duration', 'days', 'effort', 'time'])] || '',
+    remarks: row[h(['remark', 'note', 'comment', 'detail', 'feedback'])] || '',
+    eta_end: flexibleParseDate(row[h(['eta', 'due', 'deadline', 'date', 'timeline', 'completion'])]),
     priority: 'P2',
   }
 }
@@ -60,12 +100,11 @@ const CU_STATUS_MAP = {
 function mapCUStatus(s) { return CU_STATUS_MAP[s?.toLowerCase()?.trim()] || 'To Be Started' }
 
 export default function ImportPage() {
-  const [clients, setClients] = useState([])
-  const [members, setMembers] = useState([])
-  useEffect(() => {
-    apiFetch('/api/clients').then(r => r.json()).then(d => setClients(d || []))
-    apiFetch('/api/team').then(r => r.json()).then(d => setMembers(d || []))
-  }, [])
+  const { data: clientsData } = useSWR('/api/clients', swrFetcher)
+  const { data: membersData } = useSWR('/api/team', swrFetcher)
+
+  const clients = Array.isArray(clientsData) ? clientsData : []
+  const members = Array.isArray(membersData) ? membersData : []
 
   return (
     <div className="p-6">
@@ -103,26 +142,70 @@ function CSVImport({ clients }) {
     if (!file) return
     const text = await file.text()
     setRawData(text)
-    setParsed(parseCSV(text))
+    const p = parseCSV(text)
+    if (p && p.rows.length > 0) {
+      const sample = rowToTask(p.rows[0], p.headers, selectedClient)
+      if (!sample.title) p.unsupported = true
+    }
+    setParsed(p)
   }
 
-  const handlePaste = () => setParsed(parseCSV(rawData))
+  const handlePaste = () => {
+    const p = parseCSV(rawData)
+    if (p && p.rows.length > 0) {
+      const sample = rowToTask(p.rows[0], p.headers, selectedClient)
+      if (!sample.title) p.unsupported = true
+    }
+    setParsed(p)
+  }
 
   const handleImport = async () => {
     if (!parsed || !selectedClient || selectedClient === '__none__') return
     setImporting(true)
-    const tasks = parsed.rows
-      .map(row => rowToTask(row, parsed.headers, selectedClient))
-      .filter(t => t.title.trim())
-    let success = 0, failed = 0
-    for (const task of tasks) {
-      const res = await apiFetch('/api/tasks', { method: 'POST', body: JSON.stringify(task) })
-      if (res.ok) success++; else failed++
+    setResult(null)
+
+    // 1. Prepare tasks
+    const tasks = parsed.rows.map(row => rowToTask(row, parsed.headers, selectedClient))
+
+    // 2. Pre-filter locally for robustness
+    const validTasks = tasks.filter(t => t.title && t.title.trim())
+    const localSkipped = tasks.length - validTasks.length
+
+    if (validTasks.length === 0) {
+      setResult({ success: 0, failed: tasks.length, total: tasks.length, error: 'No valid tasks found. Please ensure your table has a "Task" or "Title" column.' })
+      setImporting(false)
+      return
     }
-    setResult({ success, failed, total: tasks.length })
-    setImporting(false)
-    setParsed(null)
-    setRawData('')
+
+    try {
+      const res = await apiFetch('/api/tasks/bulk', {
+        method: 'POST',
+        body: JSON.stringify({ tasks: validTasks, client_id: selectedClient })
+      })
+      const data = await res.json()
+
+      if (res.ok) {
+        setResult({
+          success: data.count,
+          failed: (data.failed || 0) + localSkipped,
+          total: tasks.length,
+          errors: data.errors || []
+        })
+        setParsed(null)
+        setRawData('')
+      } else {
+        setResult({
+          success: 0,
+          failed: tasks.length,
+          total: tasks.length,
+          error: data.error || 'Export failed at server level'
+        })
+      }
+    } catch (e) {
+      setResult({ success: 0, failed: tasks.length, total: tasks.length, error: 'Network error during bulk import' })
+    } finally {
+      setImporting(false)
+    }
   }
 
   return (
@@ -131,13 +214,19 @@ function CSVImport({ clients }) {
         <CardHeader><CardTitle className="text-base">Upload CSV or Paste from Sheets</CardTitle></CardHeader>
         <CardContent className="space-y-4">
           {result && (
-            <div className="flex items-center gap-3 p-3 bg-green-50 border border-green-200 rounded-lg">
-              <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
-              <div>
-                <p className="text-sm font-medium">{result.success} tasks imported</p>
-                {result.failed > 0 && <p className="text-xs text-red-500">{result.failed} failed</p>}
+            <div className={`flex items-center gap-3 p-3 rounded-lg border ${result.error ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'}`}>
+              {result.error ? <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" /> : <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />}
+              <div className="flex-1">
+                {result.error ? (
+                  <p className="text-sm font-medium text-red-700">{result.error}</p>
+                ) : (
+                  <>
+                    <p className="text-sm font-medium text-green-800">{result.success} tasks imported</p>
+                    {result.failed > 0 && <p className="text-xs text-red-500">{result.failed} rows skipped/failed</p>}
+                  </>
+                )}
               </div>
-              <Button size="sm" variant="outline" onClick={() => setResult(null)} className="ml-auto text-xs">Import More</Button>
+              <Button size="sm" variant="outline" onClick={() => setResult(null)} className="ml-auto text-xs">Clear</Button>
             </div>
           )}
           <div>
@@ -154,6 +243,15 @@ function CSVImport({ clients }) {
             <Button size="sm" variant={!pasteMode ? 'default' : 'outline'} onClick={() => setPasteMode(false)}>Upload CSV</Button>
             <Button size="sm" variant={pasteMode ? 'default' : 'outline'} onClick={() => setPasteMode(true)}>Paste from Sheets</Button>
           </div>
+          {parsed?.unsupported && (
+            <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-[10px] leading-tight">
+              <AlertCircle className="w-4 h-4 flex-shrink-0 text-amber-500" />
+              <div>
+                <p className="font-bold uppercase tracking-wider mb-0.5">Note on Formatting</p>
+                <p>We couldn't clearly identify a "Task" or "Title" column. We'll use the first column as the title. For best results, use a "Task Name" header.</p>
+              </div>
+            </div>
+          )}
           {!pasteMode ? (
             <label className="flex flex-col items-center justify-center w-full h-28 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
               <Upload className="w-7 h-7 text-gray-300 mb-1" />

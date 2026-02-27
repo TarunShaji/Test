@@ -1,40 +1,28 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import Link from 'next/link'
-import { apiFetch } from '@/lib/auth'
+import useSWR from 'swr'
+import { apiFetch, swrFetcher } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
-import { Plus, ExternalLink, Search, Users, CheckSquare } from 'lucide-react'
-
-const SERVICE_TYPES = ['SEO', 'Email Marketing', 'Paid Ads', 'SEO + Email', 'SEO + Paid Ads', 'All']
+import { Plus, ExternalLink, Search } from 'lucide-react'
+import { SERVICE_TYPES } from '@/lib/constants'
 
 export default function ClientsPage() {
   const router = useRouter()
-  const [clients, setClients] = useState([])
-  const [loading, setLoading] = useState(true)
+  const { data: clients, mutate, error } = useSWR('/api/clients', swrFetcher)
   const [search, setSearch] = useState('')
   const [showAdd, setShowAdd] = useState(false)
   const [form, setForm] = useState({ name: '', service_type: 'SEO', portal_password: '' })
   const [saving, setSaving] = useState(false)
   const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || ''
 
-  const loadClients = async () => {
-    const res = await apiFetch('/api/clients')
-    const data = await res.json()
-    setClients(data || [])
-    setLoading(false)
-  }
-
-  useEffect(() => { loadClients() }, [])
-
-  const filtered = clients.filter(c =>
+  const filtered = (clients || []).filter(c =>
     c.name?.toLowerCase().includes(search.toLowerCase()) ||
     c.service_type?.toLowerCase().includes(search.toLowerCase())
   )
@@ -49,17 +37,19 @@ export default function ClientsPage() {
     if (res.ok) {
       setShowAdd(false)
       setForm({ name: '', service_type: 'SEO', portal_password: '' })
-      loadClients()
+      mutate()
     }
     setSaving(false)
   }
+
+  if (!clients && !error) return <div className="p-8 text-gray-400">Loading clients...</div>
 
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Clients</h1>
-          <p className="text-gray-500 text-sm mt-1">{clients.length} active clients</p>
+          <p className="text-gray-500 text-sm mt-1">{(clients || []).length} active clients</p>
         </div>
         <Button onClick={() => setShowAdd(true)} className="gap-2">
           <Plus className="w-4 h-4" /> Add Client
@@ -92,9 +82,7 @@ export default function ClientsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {loading ? (
-                <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">Loading...</td></tr>
-              ) : filtered.length === 0 ? (
+              {filtered.length === 0 ? (
                 <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">No clients found</td></tr>
               ) : filtered.map(client => (
                 <tr key={client.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => router.push(`/dashboard/clients/${client.id}`)}>

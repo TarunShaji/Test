@@ -1,0 +1,8 @@
+Action Item,Status,Timeline,Effort,Category,Notes
+Fix Navigation Bar,In Progress,2025-06-15,2 days,Design,Mobile menu is overlapping
+Optimize Home Page SEO,implemented/completed,2025-06-20,3,SEO,Focus on LCP scores
+Setup Email Automation,WIP,2025-06-25,5,Marketing,Use Klaviyo templates
+Research Competitors,To Be Started,2025-07-01,1,Strategy,Analyze pricing models
+Broken Task Without Header,,,0,,This should show up as skipped or first col as title if partial headers exist
+Update Footer Links,done,2025-06-10,1,Tech,Check for 404s
+Client Feedback Session,pending approval,2025-06-18,2 days,Management,Video call scheduled

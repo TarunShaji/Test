@@ -10,8 +10,11 @@ import { LayoutDashboard, Loader2 } from 'lucide-react'
 
 export default function LoginPage() {
   const router = useRouter()
+  const [isSignUp, setIsSignUp] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [name, setName] = useState('')
+  const [role, setRole] = useState('SEO')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -20,19 +23,34 @@ export default function LoginPage() {
     setError('')
     setLoading(true)
     try {
-      const res = await fetch('/api/auth/login', {
+      const endpoint = isSignUp ? '/api/auth/register' : '/api/auth/login'
+      const payload = isSignUp ? { email, password, name, role } : { email, password }
+
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password })
+        body: JSON.stringify(payload)
       })
       const data = await res.json()
+
       if (!res.ok) {
-        setError(data.error || 'Login failed')
+        setError(data.error || (isSignUp ? 'Registration failed' : 'Login failed'))
         return
       }
-      localStorage.setItem('agency_token', data.token)
-      localStorage.setItem('agency_user', JSON.stringify(data.user))
-      router.push('/dashboard')
+
+      if (isSignUp) {
+        // After successful registration, switch to login or auto-login
+        // Let's auto-login for better UX if the register returns a token, 
+        // but our register API doesn't currently return a token.
+        // So we'll switch to login mode and show a success message.
+        setIsSignUp(false)
+        setError('')
+        alert('Registration successful! Please sign in with your new credentials.')
+      } else {
+        localStorage.setItem('agency_token', data.token)
+        localStorage.setItem('agency_user', JSON.stringify(data.user))
+        router.push('/dashboard')
+      }
     } catch (err) {
       setError('Network error. Please try again.')
     } finally {
@@ -41,24 +59,43 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4 text-slate-100">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-2xl mb-4">
+          <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-2xl mb-4 shadow-lg shadow-blue-500/20">
             <LayoutDashboard className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-3xl font-bold text-white">CubeHQ Dashboard</h1>
-          <p className="text-slate-400 mt-2">Sign in to manage your clients and tasks</p>
+          <h1 className="text-3xl font-bold text-white tracking-tight">CubeHQ Dashboard</h1>
+          <p className="text-slate-400 mt-2">Professional Agency Management Solution</p>
         </div>
-        <Card className="border-0 shadow-2xl">
+        <Card className="border-0 shadow-2xl bg-slate-800/50 backdrop-blur-xl border-slate-700/50">
           <CardHeader>
-            <CardTitle className="text-xl">Welcome back</CardTitle>
-            <CardDescription>Enter your credentials to continue</CardDescription>
+            <CardTitle className="text-2xl font-bold text-white">
+              {isSignUp ? 'Create Account' : 'Welcome back'}
+            </CardTitle>
+            <CardDescription className="text-slate-400">
+              {isSignUp ? 'Join the agency team' : 'Enter your credentials to continue'}
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleLogin} className="space-y-4">
+              {isSignUp && (
+                <div className="space-y-2">
+                  <Label htmlFor="name" className="text-slate-300">Full Name</Label>
+                  <Input
+                    id="name"
+                    type="text"
+                    placeholder="Sarah Chen"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    required
+                    disabled={loading}
+                    className="bg-slate-900/50 border-slate-700 text-white placeholder:text-slate-600"
+                  />
+                </div>
+              )}
               <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="email" className="text-slate-300">Email Address</Label>
                 <Input
                   id="email"
                   type="email"
@@ -67,10 +104,29 @@ export default function LoginPage() {
                   onChange={(e) => setEmail(e.target.value)}
                   required
                   disabled={loading}
+                  className="bg-slate-900/50 border-slate-700 text-white placeholder:text-slate-600"
                 />
               </div>
+              {isSignUp && (
+                <div className="space-y-2">
+                  <Label htmlFor="role" className="text-slate-300">Your Role</Label>
+                  <select
+                    id="role"
+                    value={role}
+                    onChange={(e) => setRole(e.target.value)}
+                    className="w-full h-10 px-3 rounded-md bg-slate-900/50 border border-slate-700 text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                    disabled={loading}
+                  >
+                    <option value="SEO">SEO Specialist</option>
+                    <option value="Design">Designer</option>
+                    <option value="Tech">Tech / Engineer</option>
+                    <option value="Account Manager">Account Manager</option>
+                    <option value="Admin">Administrator</option>
+                  </select>
+                </div>
+              )}
               <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
+                <Label htmlFor="password" title="password" className="text-slate-300">Password</Label>
                 <Input
                   id="password"
                   type="password"
@@ -79,19 +135,33 @@ export default function LoginPage() {
                   onChange={(e) => setPassword(e.target.value)}
                   required
                   disabled={loading}
+                  className="bg-slate-900/50 border-slate-700 text-white placeholder:text-slate-600"
                 />
               </div>
               {error && (
-                <div className="text-sm text-red-500 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+                <div className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-md px-3 py-2">
                   {error}
                 </div>
               )}
-              <Button type="submit" className="w-full" disabled={loading}>
-                {loading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Signing in...</> : 'Sign In'}
+              <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-6" disabled={loading}>
+                {loading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Processing...</> : (isSignUp ? 'Sign Up' : 'Sign In')}
               </Button>
             </form>
-            <div className="mt-4 text-xs text-center text-muted-foreground">
-              Demo: admin@agency.com / admin123
+            <div className="mt-6 flex flex-col items-center gap-4">
+              <button
+                type="button"
+                onClick={() => { setIsSignUp(!isSignUp); setError(''); }}
+                className="text-sm text-slate-400 hover:text-blue-400 transition-colors"
+                disabled={loading}
+              >
+                {isSignUp ? 'Already have an account? Sign In' : "Don't have an account? Sign Up"}
+              </button>
+
+              {!isSignUp && (
+                <div className="text-[10px] text-slate-500 text-center uppercase tracking-widest leading-relaxed">
+                  Default: admin@agency.com / admin123
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
