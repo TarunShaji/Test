@@ -1,5 +1,5 @@
 const { MongoClient } = require('mongodb');
-require('dotenv').config({ path: '.env.local' });
+require('dotenv').config();
 
 async function truncateDB() {
     const url = process.env.MONGO_URL || 'mongodb://localhost:27017';
