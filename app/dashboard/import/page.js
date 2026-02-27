@@ -9,9 +9,9 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Upload, CheckCircle, AlertCircle, Loader2, Key, RefreshCw, Link2 } from 'lucide-react'
+import { Upload, CheckCircle, AlertCircle, Loader2, Key } from 'lucide-react'
 
-// ────────── CSV HELPERS ──────────
+// ────────── STATUS MAPPING ──────────
 const STATUS_MAP = {
   'implemented/ completed': 'Completed', 'implemented/completed': 'Completed',
   'completed': 'Completed', 'complete': 'Completed', 'done': 'Completed', 'fixed': 'Completed',
@@ -23,63 +23,130 @@ const STATUS_MAP = {
 }
 function mapStatus(s) { return s ? (STATUS_MAP[s.toLowerCase().trim()] || 'To Be Started') : 'To Be Started' }
 
+// ────────── DATE PARSING ──────────
 function flexibleParseDate(str) {
   if (!str) return null
-  const s = str.trim()
+  const s = String(str).trim()
   if (!s) return null
-
-  // Common spreadsheet formats
   const formats = [
-    'yyyy-MM-dd',
-    'dd-MM-yyyy',
-    'MM-dd-yyyy',
-    'dd/MM/yyyy',
-    'MM/dd/yyyy',
-    'MMM d, yyyy',
-    'MMMM d, yyyy',
-    'yyyy/MM/dd',
-    'd-M-yyyy',
-    'M-d-yyyy',
-    'd/M/yyyy',
-    'M/d/yyyy'
+    'yyyy-MM-dd', 'dd-MM-yyyy', 'MM-dd-yyyy',
+    'dd/MM/yyyy', 'MM/dd/yyyy', 'MMM d, yyyy',
+    'MMMM d, yyyy', 'yyyy/MM/dd',
+    'd-M-yyyy', 'M-d-yyyy', 'd/M/yyyy', 'M/d/yyyy',
+    'd MMM yyyy', 'd MMMM yyyy',
   ]
-
   for (const f of formats) {
     try {
       const d = parse(s, f, new Date())
       if (isValid(d)) return format(d, 'yyyy-MM-dd')
-    } catch (e) { }
+    } catch (e) { /* continue */ }
   }
-
   const native = new Date(s)
   if (!isNaN(native.getTime())) return format(native, 'yyyy-MM-dd')
-
   return null
 }
 
+// ────────── ROBUST CSV PARSER ──────────
+// Handles:
+//   - Quoted fields with commas inside: "hello, world"
+//   - Quoted fields with embedded newlines
+//   - Tab-separated (Google Sheets paste)
+//   - Mixed quote styles, leading/trailing whitespace
 function parseCSV(text) {
   if (!text || !text.trim()) return null
-  const lines = safeArray(text.split(/\r?\n/).filter(l => l.trim()))
+
+  // Detect separator: prefer tab (Google Sheets) then comma
+  const firstLine = text.split(/\r?\n/)[0] || ''
+  const sep = firstLine.includes('\t') ? '\t' : ','
+
+  /** Tokenize a full CSV record respecting RFC-4180 quoting */
+  function tokenize(line, s) {
+    const cells = []
+    let i = 0
+    while (i <= line.length) {
+      if (line[i] === '"') {
+        // Quoted cell
+        let cell = ''
+        i++ // skip opening quote
+        while (i < line.length) {
+          if (line[i] === '"' && line[i + 1] === '"') {
+            cell += '"'; i += 2
+          } else if (line[i] === '"') {
+            i++; break
+          } else {
+            cell += line[i++]
+          }
+        }
+        cells.push(cell.trim())
+        if (line[i] === s) i++ // skip separator after closing quote
+      } else {
+        // Unquoted cell
+        const end = line.indexOf(s, i)
+        if (end === -1) {
+          cells.push(line.slice(i).trim())
+          break
+        } else {
+          cells.push(line.slice(i, end).trim())
+          i = end + 1
+        }
+      }
+    }
+    return cells
+  }
+
+  // Split lines, being careful not to split inside quoted fields
+  function splitLines(raw) {
+    const lines = []
+    let current = ''
+    let inQuote = false
+    for (let i = 0; i < raw.length; i++) {
+      const ch = raw[i]
+      if (ch === '"') inQuote = !inQuote
+      if ((ch === '\n' || (ch === '\r' && raw[i + 1] === '\n')) && !inQuote) {
+        if (ch === '\r') i++ // skip \n after \r
+        if (current.trim()) lines.push(current)
+        current = ''
+      } else {
+        current += ch
+      }
+    }
+    if (current.trim()) lines.push(current)
+    return lines
+  }
+
+  const lines = splitLines(text)
   if (lines.length < 2) return null
-  const sep = text.includes('\t') ? '\t' : ','
-  // Clean headers: lower, no quotes, no extra spaces
-  const headers = safeArray(lines[0]?.split(sep)).map(h => h.trim().replace(/^["']|["']$/g, '').toLowerCase())
+
+  const headers = tokenize(lines[0], sep)
+    .map(h => h.replace(/^["']|["']$/g, '').toLowerCase().trim())
+    .filter(h => h)
+
   if (headers.length === 0) return null
 
-  const rows = safeArray(lines.slice(1)).map(line => {
-    const vals = safeArray(line?.split(sep)).map(v => v.trim().replace(/^["']|["']$/g, ''))
-    return Object.fromEntries(safeArray(headers).map((h, i) => [h, vals[i] || '']))
-  }).filter(r => Object.values(r).some(v => v))
+  const rows = lines.slice(1)
+    .map(line => {
+      const vals = tokenize(line, sep)
+      const obj = {}
+      headers.forEach((h, i) => {
+        obj[h] = (vals[i] || '').replace(/^["']|["']$/g, '').trim()
+      })
+      return obj
+    })
+    .filter(r => Object.values(r).some(v => v && v.toString().trim()))
+
   return { headers, rows }
 }
 
+// ────────── ROW → TASK ──────────
 function rowToTask(row, headers, clientId) {
-  const h = (keywords) => headers.find(h => keywords.some(k => h.includes(k))) || ''
+  if (!row || !headers || !clientId) return null
+  const h = (kws) => headers.find(hdr => kws.some(k => hdr.includes(k))) || ''
   const titleField = h(['to-do', 'todo', 'task', 'title', 'name', 'action item', 'item', 'description']) || headers[0]
-
+  const title = (row[titleField] || '').trim()
+  if (!title) return null  // skip empty rows
   return {
     client_id: clientId,
-    title: row[titleField] || '',
+    title,
     status: mapStatus(row[h(['status'])] || ''),
     category: row[h(['category', 'type', 'group', 'industry'])] || 'Other',
     duration_days: row[h(['duration', 'days', 'effort', 'time'])] || '',
@@ -89,17 +156,17 @@ function rowToTask(row, headers, clientId) {
   }
 }
 
-// ────────── CLICKUP HELPERS ──────────
+// ────────── CLICKUP STATUS MAPPING ──────────
 const CU_STATUS_MAP = {
   'to do': 'To Be Started', 'open': 'To Be Started', 'not started': 'To Be Started',
   'in progress': 'In Progress', 'active': 'In Progress', 'in review': 'Pending Review',
   'review': 'Pending Review', 'approval': 'Pending Review',
   'complete': 'Completed', 'done': 'Completed', 'closed': 'Completed',
-  'blocked': 'Blocked', 'on hold': 'Blocked',
-  'recurring': 'Recurring',
+  'blocked': 'Blocked', 'on hold': 'Blocked', 'recurring': 'Recurring',
 }
 function mapCUStatus(s) { return CU_STATUS_MAP[s?.toLowerCase()?.trim()] || 'To Be Started' }
 
+// ─── MAIN PAGE ───────────────────────────────────────────────────────────────
 export default function ImportPage() {
   const { data: clientsData } = useSWR('/api/clients', swrFetcher)
   const { data: membersData } = useSWR('/api/team', swrFetcher)
@@ -137,27 +204,44 @@ function CSVImport({ clients }) {
   const [importing, setImporting] = useState(false)
   const [result, setResult] = useState(null)
   const [pasteMode, setPasteMode] = useState(false)
+  const [parseError, setParseError] = useState('')
 
-  const handleFile = async (e) => {
-    const file = e.target.files[0]
-    if (!file) return
-    const text = await file.text()
-    setRawData(text)
-    const p = parseCSV(text)
-    if (p && p.rows.length > 0) {
-      const sample = rowToTask(p.rows[0], p.headers, selectedClient)
-      if (!sample.title) p.unsupported = true
+  const doParse = (text) => {
+    setParseError('')
+    try {
+      const p = parseCSV(text)
+      if (!p) {
+        setParseError('Could not parse the data. Make sure it has at least a header row and one data row.')
+        setParsed(null)
+        return
+      }
+      const validRows = p.rows.filter(r => {
+        const h = (kws) => p.headers.find(hdr => kws.some(k => hdr.includes(k))) || p.headers[0]
+        const titleField = h(['to-do', 'todo', 'task', 'title', 'name', 'action item', 'item', 'description'])
+        return (r[titleField] || r[p.headers[0]] || '').trim()
+      })
+      if (validRows.length === 0) {
+        p.unsupported = true
+      }
+      setParsed(p)
+    } catch (e) {
+      setParseError('Error parsing data: ' + (e?.message || 'Unknown error'))
+      setParsed(null)
     }
-    setParsed(p)
   }
 
-  const handlePaste = () => {
-    const p = parseCSV(rawData)
-    if (p && p.rows.length > 0) {
-      const sample = rowToTask(p.rows[0], p.headers, selectedClient)
-      if (!sample.title) p.unsupported = true
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    // Reset input so same file can be re-selected
+    e.target.value = ''
+    try {
+      const text = await file.text()
+      setRawData(text)
+      doParse(text)
+    } catch (e) {
+      setParseError('Failed to read file: ' + (e?.message || 'Unknown error'))
     }
-    setParsed(p)
   }
 
   const handleImport = async () => {
@@ -165,15 +249,19 @@ function CSVImport({ clients }) {
     setImporting(true)
     setResult(null)
 
-    // 1. Prepare tasks
-    const tasks = safeArray(parsed?.rows).map(row => rowToTask(row, parsed.headers, selectedClient))
+    let tasks = []
+    try {
+      tasks = safeArray(parsed?.rows)
+        .map(row => rowToTask(row, parsed.headers, selectedClient))
+        .filter(Boolean)
+    } catch (e) {
+      setResult({ success: 0, failed: 0, total: 0, error: 'Failed to process rows: ' + (e?.message || '') })
+      setImporting(false)
+      return
+    }
 
-    // 2. Pre-filter locally for robustness
-    const validTasks = tasks.filter(t => t.title && t.title.trim())
-    const localSkipped = tasks.length - validTasks.length
-
-    if (validTasks.length === 0) {
-      setResult({ success: 0, failed: tasks.length, total: tasks.length, error: 'No valid tasks found. Please ensure your table has a "Task" or "Title" column.' })
+    if (tasks.length === 0) {
+      setResult({ success: 0, failed: parsed.rows.length, total: parsed.rows.length, error: 'No valid tasks found. Ensure your table has a "Task" or "Title" column.' })
       setImporting(false)
       return
     }
@@ -181,16 +269,18 @@ function CSVImport({ clients }) {
     try {
       const res = await apiFetch('/api/tasks/bulk', {
         method: 'POST',
-        body: JSON.stringify({ tasks: validTasks, client_id: selectedClient })
+        body: JSON.stringify({ tasks, client_id: selectedClient })
       })
-      const data = await res.json()
+
+      let data = {}
+      try { data = await res.json() } catch (e) { /* non-JSON response */ }
 
       if (res.ok) {
         setResult({
-          success: data.count,
-          failed: (data.failed || 0) + localSkipped,
+          success: data.count ?? tasks.length,
+          failed: data.failed ?? 0,
           total: tasks.length,
-          errors: data.errors || []
+          errors: safeArray(data.errors)
         })
         setParsed(null)
         setRawData('')
@@ -199,11 +289,11 @@ function CSVImport({ clients }) {
           success: 0,
           failed: tasks.length,
           total: tasks.length,
-          error: data.error || 'Export failed at server level'
+          error: data.error || `Server error (${res.status})`
         })
       }
     } catch (e) {
-      setResult({ success: 0, failed: tasks.length, total: tasks.length, error: 'Network error during bulk import' })
+      setResult({ success: 0, failed: tasks.length, total: tasks.length, error: 'Network error: ' + (e?.message || 'Could not reach server') })
     } finally {
       setImporting(false)
     }
@@ -215,19 +305,27 @@ function CSVImport({ clients }) {
         <CardHeader><CardTitle className="text-base">Upload CSV or Paste from Sheets</CardTitle></CardHeader>
         <CardContent className="space-y-4">
           {result && (
-            <div className={`flex items-center gap-3 p-3 rounded-lg border ${result.error ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'}`}>
-              {result.error ? <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" /> : <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />}
+            <div className={`flex items-start gap-3 p-3 rounded-lg border ${result.error ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'}`}>
+              {result.error
+                ? <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                : <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+              }
               <div className="flex-1">
-                {result.error ? (
-                  <p className="text-sm font-medium text-red-700">{result.error}</p>
-                ) : (
-                  <>
-                    <p className="text-sm font-medium text-green-800">{result.success} tasks imported</p>
-                    {result.failed > 0 && <p className="text-xs text-red-500">{result.failed} rows skipped/failed</p>}
+                {result.error
+                  ? <p className="text-sm font-medium text-red-700">{result.error}</p>
+                  : <>
+                    <p className="text-sm font-medium text-green-800">{result.success} tasks imported successfully</p>
+                    {result.failed > 0 && <p className="text-xs text-red-500 mt-0.5">{result.failed} rows skipped (empty title or invalid)</p>}
                   </>
-                )}
+                }
               </div>
-              <Button size="sm" variant="outline" onClick={() => setResult(null)} className="ml-auto text-xs">Clear</Button>
+              <Button size="sm" variant="outline" onClick={() => setResult(null)} className="ml-auto text-xs flex-shrink-0">Clear</Button>
+            </div>
+          )}
+          {parseError && (
+            <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+              <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0" />
+              <p className="text-xs text-red-700">{parseError}</p>
             </div>
           )}
           <div>
@@ -248,8 +346,8 @@ function CSVImport({ clients }) {
             <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-[10px] leading-tight">
               <AlertCircle className="w-4 h-4 flex-shrink-0 text-amber-500" />
               <div>
-                <p className="font-bold uppercase tracking-wider mb-0.5">Note on Formatting</p>
-                <p>We couldn't clearly identify a "Task" or "Title" column. We'll use the first column as the title. For best results, use a "Task Name" header.</p>
+                <p className="font-bold uppercase tracking-wider mb-0.5">Note on Column Names</p>
+                <p>Couldn't find a clear "Task" or "Title" column. Using the first column as title. Consider renaming your column to "Task Name" for best results.</p>
               </div>
             </div>
           )}
@@ -261,13 +359,28 @@ function CSVImport({ clients }) {
             </label>
           ) : (
             <div className="space-y-2">
-              <textarea value={rawData} onChange={e => setRawData(e.target.value)} placeholder="Paste tab-separated data from Google Sheets here..." className="w-full h-36 p-3 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-blue-400 font-mono resize-none" />
-              <Button size="sm" onClick={handlePaste} disabled={!rawData.trim()}>Parse</Button>
+              <textarea
+                value={rawData}
+                onChange={e => setRawData(e.target.value)}
+                placeholder="Paste tab-separated data from Google Sheets here..."
+                className="w-full h-36 p-3 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-blue-400 font-mono resize-none"
+              />
+              <Button size="sm" onClick={() => doParse(rawData)} disabled={!rawData.trim()}>Parse</Button>
             </div>
           )}
           {parsed && (
-            <Button className="w-full" onClick={handleImport} disabled={importing || selectedClient === '__none__'}>
-              {importing ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Importing...</> : `Import ${parsed.rows.length} Tasks`}
+            <Button
+              className="w-full"
+              onClick={handleImport}
+              disabled={importing || selectedClient === '__none__'}
+            >
+              {importing
+                ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Importing...</>
+                : `Import ${parsed.rows.filter(r => {
+                  const t = parsed.headers.find(h => ['task', 'title', 'to-do', 'todo', 'name', 'action item', 'item'].some(k => h.includes(k))) || parsed.headers[0]
+                  return (r[t] || '').trim()
+                }).length} Tasks`
+              }
             </Button>
           )}
         </CardContent>
@@ -295,9 +408,17 @@ function CSVImport({ clients }) {
         <Card className="border border-gray-100 bg-gray-50">
           <CardHeader><CardTitle className="text-sm text-gray-500">Supported Formats</CardTitle></CardHeader>
           <CardContent className="space-y-3 text-xs text-gray-500">
-            <div><p className="font-medium text-gray-700 mb-1">Format A (Behno style):</p><code className="bg-white border border-gray-200 rounded px-2 py-1 block">To-dos, Duration, Status, ETA, Remarks</code></div>
-            <div><p className="font-medium text-gray-700 mb-1">Format B (Warehouse style):</p><code className="bg-white border border-gray-200 rounded px-2 py-1 block">Category, Task, Status, Notes</code></div>
-            <div><p className="font-medium text-gray-700 mb-1">Status auto-mapping:</p><ul className="space-y-0.5"><li>"Work in Progress" → <span className="text-blue-600">In Progress</span></li><li>"Implemented/Completed" → <span className="text-green-600">Completed</span></li><li>"In Review" → <span className="text-amber-600">Pending Review</span></li></ul></div>
+            <div><p className="font-medium text-gray-700 mb-1">Format A:</p><code className="bg-white border border-gray-200 rounded px-2 py-1 block">To-dos, Duration, Status, ETA, Remarks</code></div>
+            <div><p className="font-medium text-gray-700 mb-1">Format B:</p><code className="bg-white border border-gray-200 rounded px-2 py-1 block">Category, Task, Status, Notes</code></div>
+            <div>
+              <p className="font-medium text-gray-700 mb-1">Status auto-mapping:</p>
+              <ul className="space-y-0.5">
+                <li>"Work in Progress" → <span className="text-blue-600">In Progress</span></li>
+                <li>"Implemented/Completed" → <span className="text-green-600">Completed</span></li>
+                <li>"In Review" → <span className="text-amber-600">Pending Review</span></li>
+              </ul>
+            </div>
+            <div><p className="font-medium text-gray-700 mb-1">Paste from Google Sheets:</p><p>Select your sheet cells → Copy → Paste here. Tab-separated data is handled automatically.</p></div>
           </CardContent>
         </Card>
       )}
@@ -311,7 +432,6 @@ function ClickUpImport({ clients, members }) {
   const [tokenSaved, setTokenSaved] = useState(false)
   const [workspaces, setWorkspaces] = useState([])
   const [selectedWS, setSelectedWS] = useState('__none__')
-  const [spaces, setSpaces] = useState([])
   const [lists, setLists] = useState([])
   const [selectedLists, setSelectedLists] = useState([])
   const [selectedClient, setSelectedClient] = useState('__none__')
@@ -328,15 +448,21 @@ function ClickUpImport({ clients, members }) {
     if (!apiToken.trim()) { setError('Please enter your ClickUp API token'); return }
     setError('')
     setLoadingWS(true)
-    const res = await apiFetch('/api/clickup/workspaces', {
-      method: 'POST',
-      body: JSON.stringify({ token: apiToken })
-    })
-    const data = await res.json()
-    if (!res.ok) { setError(data.error || 'Failed to fetch workspaces'); setLoadingWS(false); return }
-    setWorkspaces(data.workspaces || [])
-    setTokenSaved(true)
-    setLoadingWS(false)
+    try {
+      const res = await apiFetch('/api/clickup/workspaces', {
+        method: 'POST',
+        body: JSON.stringify({ token: apiToken })
+      })
+      let data = {}
+      try { data = await res.json() } catch (e) { /* ignore */ }
+      if (!res.ok) { setError(data.error || 'Failed to fetch workspaces'); return }
+      setWorkspaces(safeArray(data.workspaces))
+      setTokenSaved(true)
+    } catch (e) {
+      setError('Network error: ' + (e?.message || 'Could not connect'))
+    } finally {
+      setLoadingWS(false)
+    }
   }
 
   const fetchLists = async (wsId) => {
@@ -345,14 +471,20 @@ function ClickUpImport({ clients, members }) {
     setSelectedLists([])
     if (wsId === '__none__') return
     setLoadingLists(true)
-    const res = await apiFetch('/api/clickup/lists', {
-      method: 'POST',
-      body: JSON.stringify({ token: apiToken, workspace_id: wsId })
-    })
-    const data = await res.json()
-    if (!res.ok) { setError(data.error || 'Failed to fetch lists'); setLoadingLists(false); return }
-    setLists(data.lists || [])
-    setLoadingLists(false)
+    try {
+      const res = await apiFetch('/api/clickup/lists', {
+        method: 'POST',
+        body: JSON.stringify({ token: apiToken, workspace_id: wsId })
+      })
+      let data = {}
+      try { data = await res.json() } catch (e) { /* ignore */ }
+      if (!res.ok) { setError(data.error || 'Failed to fetch lists'); return }
+      setLists(safeArray(data.lists))
+    } catch (e) {
+      setError('Network error: ' + (e?.message || 'Could not fetch lists'))
+    } finally {
+      setLoadingLists(false)
+    }
   }
 
   const toggleList = (id) => setSelectedLists(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id])
@@ -362,26 +494,28 @@ function ClickUpImport({ clients, members }) {
     setImporting(true)
     setResult(null)
     setImportLog([])
+    setError('')
     log(`Starting import of ${selectedLists.length} list(s)...`)
 
-    const res = await apiFetch('/api/clickup/import', {
-      method: 'POST',
-      body: JSON.stringify({
-        token: apiToken,
-        list_ids: selectedLists,
-        client_id: selectedClient,
-        members
+    try {
+      const res = await apiFetch('/api/clickup/import', {
+        method: 'POST',
+        body: JSON.stringify({ token: apiToken, list_ids: selectedLists, client_id: selectedClient, members })
       })
-    })
-    const data = await res.json()
-    if (!res.ok) {
-      setError(data.error || 'Import failed')
+      let data = {}
+      try { data = await res.json() } catch (e) { /* ignore */ }
+      if (!res.ok) {
+        setError(data.error || 'Import failed')
+        return
+      }
+      setResult(data)
+      log(`✅ Done! ${data.imported ?? 0} tasks imported, ${data.skipped ?? 0} skipped.`)
+    } catch (e) {
+      setError('Network error: ' + (e?.message || 'Could not complete import'))
+      log('❌ Import failed: ' + (e?.message || ''))
+    } finally {
       setImporting(false)
-      return
     }
-    setResult(data)
-    log(`✅ Done! ${data.imported} tasks imported, ${data.skipped} skipped.`)
-    setImporting(false)
   }
 
   return (
@@ -389,6 +523,7 @@ function ClickUpImport({ clients, members }) {
       {error && (
         <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
           <AlertCircle className="w-4 h-4 flex-shrink-0" />{error}
+          <button onClick={() => setError('')} className="ml-auto text-red-400 hover:text-red-600 text-xs underline">Dismiss</button>
         </div>
       )}
 
@@ -397,7 +532,7 @@ function ClickUpImport({ clients, members }) {
           <CheckCircle className="w-5 h-5 text-green-600" />
           <div>
             <p className="font-semibold text-gray-900">Import Complete!</p>
-            <p className="text-sm text-gray-600">{result.imported} tasks imported · {result.skipped} already existed</p>
+            <p className="text-sm text-gray-600">{result.imported ?? 0} tasks imported · {result.skipped ?? 0} already existed</p>
           </div>
           <Button size="sm" variant="outline" onClick={() => { setResult(null); setSelectedLists([]) }} className="ml-auto">Import More</Button>
         </div>
@@ -436,21 +571,14 @@ function ClickUpImport({ clients, members }) {
                 {safeArray(workspaces).map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}
               </SelectContent>
             </Select>
-
             {loadingLists && <div className="flex items-center gap-2 text-xs text-gray-400"><Loader2 className="w-3 h-3 animate-spin" /> Fetching lists...</div>}
-
             {lists.length > 0 && (
               <div>
                 <p className="text-xs font-medium text-gray-600 mb-2">Select lists to import ({selectedLists.length} selected):</p>
                 <div className="space-y-1 max-h-48 overflow-y-auto">
                   {safeArray(lists).map(l => (
                     <label key={l.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-50 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={selectedLists.includes(l.id)}
-                        onChange={() => toggleList(l.id)}
-                        className="rounded"
-                      />
+                      <input type="checkbox" checked={selectedLists.includes(l.id)} onChange={() => toggleList(l.id)} className="rounded" />
                       <span className="text-sm text-gray-700">{l?.name}</span>
                       <span className="text-xs text-gray-400 ml-auto">{l?.space_name}</span>
                     </label>

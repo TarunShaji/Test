@@ -14,7 +14,6 @@ import { Badge } from '@/components/ui/badge'
 
 const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, exact: true },
-  { href: '/dashboard/clients', label: 'Clients', icon: Users },
   { href: '/dashboard/tasks', label: 'All Tasks', icon: CheckSquare },
   { href: '/dashboard/content', label: 'Content Calendar', icon: FileText },
   { href: '/dashboard/team', label: 'Team', icon: UserCircle },

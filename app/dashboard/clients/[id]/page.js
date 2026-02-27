@@ -573,7 +573,7 @@ export default function ClientDetailPage() {
       <div className="flex items-center justify-between mb-5">
         <div>
           <div className="flex items-center gap-2 text-sm text-gray-400 mb-1">
-            <Link href="/dashboard/clients" className="hover:text-gray-600">Clients</Link>
+            <Link href="/dashboard" className="hover:text-gray-600">Dashboard</Link>
             <span>/</span>
             <span className="text-gray-700 font-medium">{client?.name}</span>
           </div>
