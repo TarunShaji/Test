@@ -8,7 +8,7 @@ import { TeamMemberSchema } from '@/lib/schemas/team.schema'
 export async function GET(request) {
     return withAuth(request, async () => {
         const database = await connectToMongo()
-        const members = await database.collection('team_members').find({}).sort({ name: 1 }).toArray()
+        const members = await database.collection('team_members').find({ is_active: { $ne: false } }).sort({ name: 1 }).toArray()
         const clean = members.map(({ _id, password_hash, ...m }) => m)
         return handleCORS(NextResponse.json(clean))
     })

@@ -310,33 +310,38 @@ export default function ContentCalendarPage() {
         </div>
       </div>
 
-      {showFilters && (
-        <div className="bg-white border border-gray-200 rounded-lg p-4 mb-4 flex items-center gap-4 flex-wrap">
-          <div className="flex items-center gap-2">
-            <Search className="w-4 h-4 text-gray-400" />
-            <Input
-              type="text" placeholder="Search title, keyword, writer..."
-              value={filters.search} onChange={e => setFilters(f => ({ ...f, search: e.target.value }))}
-              className="w-64 h-8 text-sm"
-            />
-          </div>
-          <Select value={filters.client_id || '__all__'} onValueChange={v => setFilters(f => ({ ...f, client_id: v === '__all__' ? '' : v }))}>
-            <SelectTrigger className="w-48 h-8 text-sm"><SelectValue placeholder="All Clients" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">All Clients</SelectItem>
-              {safeArray(clients).map(c => <SelectItem key={c?.id} value={c?.id}>{c?.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Select value={filters.blog_status || '__all__'} onValueChange={v => setFilters(f => ({ ...f, blog_status: v === '__all__' ? '' : v }))}>
-            <SelectTrigger className="w-40 h-8 text-sm"><SelectValue placeholder="All Statuses" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">All Statuses</SelectItem>
-              {BLOG_STATUSES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Button variant="ghost" size="sm" onClick={() => setFilters({ client_id: '', blog_status: '', search: '' })}>Clear</Button>
+      {/* Always-visible search + collapsible filter bar */}
+      <div className="flex flex-wrap gap-2 mb-4 p-3 bg-white border border-gray-200 rounded-lg items-center">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+          <Input
+            type="text" placeholder="Search blog title, keyword, writer…"
+            value={filters.search} onChange={e => setFilters(f => ({ ...f, search: e.target.value }))}
+            className="h-8 text-xs pl-8 w-60 border-gray-200"
+          />
         </div>
-      )}
+        {showFilters && (
+          <>
+            <Select value={filters.client_id || '__all__'} onValueChange={v => setFilters(f => ({ ...f, client_id: v === '__all__' ? '' : v }))}>
+              <SelectTrigger className="w-44 h-8 text-xs"><SelectValue placeholder="All Clients" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All Clients</SelectItem>
+                {safeArray(clients).map(c => <SelectItem key={c?.id} value={c?.id}>{c?.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={filters.blog_status || '__all__'} onValueChange={v => setFilters(f => ({ ...f, blog_status: v === '__all__' ? '' : v }))}>
+              <SelectTrigger className="w-36 h-8 text-xs"><SelectValue placeholder="All Statuses" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All Statuses</SelectItem>
+                {BLOG_STATUSES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </>
+        )}
+        {(filters.search || filters.client_id || filters.blog_status) && (
+          <button onClick={() => setFilters({ client_id: '', blog_status: '', search: '' })} className="text-xs text-gray-400 hover:text-gray-600 underline ml-1">Clear</button>
+        )}
+      </div>
 
       {/* Main Table with DnD */}
       <div className="bg-white border border-gray-200 rounded-lg overflow-auto shadow-sm">

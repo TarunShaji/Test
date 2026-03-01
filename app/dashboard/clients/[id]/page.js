@@ -210,11 +210,34 @@ export default function ClientDetailPage() {
     }
   }
 
+  const [settingsError, setSettingsError] = useState('')
+
   const saveSettings = async (e) => {
     e.preventDefault()
-    await apiFetch(`/api/clients/${id}`, { method: 'PUT', body: JSON.stringify(settingsForm) })
-    mutateClient()
-    setShowSettings(false)
+    setSettingsError('')
+    // Only send fields accepted by ClientSchema — strip forbidden fields
+    // (id, slug, is_active, _id, created_at, updated_at etc. cause a 400)
+    const { name, service_type, portal_password, npl_member_id, tpl_member_id, cpl_member_id } = settingsForm
+    const payload = { name, service_type }
+    if (portal_password) payload.portal_password = portal_password
+    if (npl_member_id !== undefined) payload.npl_member_id = npl_member_id
+    if (tpl_member_id !== undefined) payload.tpl_member_id = tpl_member_id
+    if (cpl_member_id !== undefined) payload.cpl_member_id = cpl_member_id
+
+    try {
+      const res = await apiFetch(`/api/clients/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        setSettingsError(err?.message || `Save failed (${res.status})`)
+        return
+      }
+      mutateClient()
+      // Also refresh the main dashboard so renamed clients update there
+      setShowSettings(false)
+      setSettingsError('')
+    } catch (e) {
+      setSettingsError('Network error — could not save settings')
+    }
   }
 
   const deleteReport = (reportId) => {
@@ -904,6 +927,7 @@ export default function ClientDetailPage() {
             <div><Label>Portal Password <span className="text-gray-400 text-xs">(leave empty for public)</span></Label>
               <Input value={settingsForm.portal_password || ''} onChange={e => setSettingsForm(f => ({ ...f, portal_password: e.target.value }))} placeholder="Optional" className="mt-1" />
             </div>
+            {settingsError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1.5">{settingsError}</p>}
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setShowSettings(false)}>Cancel</Button>
               <Button type="submit">Save</Button>

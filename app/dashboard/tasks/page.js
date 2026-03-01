@@ -5,7 +5,8 @@ import { apiFetch } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Plus, Trash2, RefreshCw, Link2, GripVertical, GripHorizontal } from 'lucide-react'
+import { Plus, Trash2, RefreshCw, Link2, GripVertical, GripHorizontal, Search } from 'lucide-react'
+import { Input } from '@/components/ui/input'
 import { safeJSON, safeArray } from '@/lib/safe'
 import { EditableCell } from '@/components/EditableCell'
 import { LinkCell } from '@/components/LinkCell'
@@ -49,6 +50,7 @@ export default function AllTasksPage() {
   const [filterCategory, setFilterCategory] = useState('all')
   const [filterAssignee, setFilterAssignee] = useState('all')
   const [filterPriority, setFilterPriority] = useState('all')
+  const [filterSearch, setFilterSearch] = useState('')
   const [sortField, setSortField] = useState('created_at')
   const [sortDir, setSortDir] = useState('desc')
 
@@ -182,16 +184,21 @@ export default function AllTasksPage() {
 
   const allTasks = useMemo(() => safeArray(tasks), [tasks])
   const memberMap = useMemo(() => Object.fromEntries(safeArray(members).map(m => [m?.id, m?.name])), [members])
-  const anyFilter = useMemo(() => filterClient !== 'all' || filterStatus !== 'all' || filterCategory !== 'all' || filterAssignee !== 'all' || filterPriority !== 'all', [filterClient, filterStatus, filterCategory, filterAssignee, filterPriority])
+  const anyFilter = useMemo(() => filterClient !== 'all' || filterStatus !== 'all' || filterCategory !== 'all' || filterAssignee !== 'all' || filterPriority !== 'all' || filterSearch.trim() !== '', [filterClient, filterStatus, filterCategory, filterAssignee, filterPriority, filterSearch])
 
   const sorted = useMemo(() => {
-    if (!sortField) return allTasks
-    return [...allTasks].sort((a, b) => {
+    let base = allTasks
+    if (filterSearch.trim()) {
+      const q = filterSearch.toLowerCase().trim()
+      base = base.filter(t => (t?.title || '').toLowerCase().includes(q))
+    }
+    if (!sortField) return base
+    return [...base].sort((a, b) => {
       const va = a?.[sortField] || ''
       const vb = b?.[sortField] || ''
       return sortDir === 'asc' ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va))
     })
-  }, [allTasks, sortField, sortDir])
+  }, [allTasks, sortField, sortDir, filterSearch])
 
   const handleSort = (field) => {
     if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -358,6 +365,16 @@ export default function AllTasksPage() {
 
       {/* Filters omitted for brevity, same as before */}
       <div className="flex flex-wrap gap-2 mb-4 p-3 bg-white border border-gray-200 rounded-lg">
+        {/* Search */}
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+          <Input
+            value={filterSearch}
+            onChange={e => setFilterSearch(e.target.value)}
+            placeholder="Search tasks…"
+            className="h-8 text-xs pl-8 w-44 border-gray-200"
+          />
+        </div>
         <Select value={filterClient} onValueChange={setFilterClient}>
           <SelectTrigger className="h-8 text-xs w-36"><SelectValue placeholder="All Clients" /></SelectTrigger>
           <SelectContent>
@@ -396,7 +413,7 @@ export default function AllTasksPage() {
         {anyFilter && (
           <Button variant="ghost" size="sm" className="h-8 text-xs text-gray-400" onClick={() => {
             setFilterClient('all'); setFilterStatus('all'); setFilterCategory('all')
-            setFilterAssignee('all'); setFilterPriority('all')
+            setFilterAssignee('all'); setFilterPriority('all'); setFilterSearch('')
           }}>Clear filters</Button>
         )}
       </div>
