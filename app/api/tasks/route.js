@@ -1,11 +1,21 @@
 import { NextResponse } from 'next/server'
 import { v4 as uuidv4 } from 'uuid'
 import { connectToMongo } from '@/lib/mongodb'
-import { handleCORS, withAuth, withErrorLogging } from '@/lib/api-utils'
-import { applyTaskTransition } from '@/lib/lifecycleEngine'
+import { handleCORS, withAuth } from '@/lib/api-utils'
+import { applyTaskTransition, assertTaskInvariant } from '@/lib/lifecycleEngine'
 import { safeURL, safeArray } from '@/lib/safe'
-import { validateBody } from '@/lib/validation'
+import { validateBody, rejectFields } from '@/lib/validation'
 import { TaskCreateSchema } from '@/lib/schemas/task.schema'
+
+export const runtime = 'nodejs';
+
+const FORBIDDEN_FIELDS = [
+    'internal_approval',
+    'client_link_visible',
+    'client_approval',
+    'client_feedback_note',
+    'client_feedback_at'
+];
 
 export async function GET(request) {
     return withAuth(request, async () => {
@@ -48,17 +58,6 @@ export async function GET(request) {
     })
 }
 
-import { assertTaskInvariant } from '@/lib/lifecycleEngine'
-import { rejectFields } from '@/lib/validation'
-
-const FORBIDDEN_FIELDS = [
-    'internal_approval',
-    'client_link_visible',
-    'client_approval',
-    'client_feedback_note',
-    'client_feedback_at'
-];
-
 export async function POST(request) {
     return withAuth(request, async () => {
         const database = await connectToMongo()
@@ -79,27 +78,16 @@ export async function POST(request) {
         const cleanData = validation.data
 
         // 3. Engine-Backed Creation
-        let finalTask;
-        try {
-            // We pass null as currentTask to indicate creation mode
-            // the engine will handle defaults and invariants
-            finalTask = applyTaskTransition(null, {
-                ...cleanData,
-                id: uuidv4()
-            });
-        } catch (error) {
-            return handleCORS(NextResponse.json({ error: error.message }, { status: 400 }))
-        }
+        const finalTask = applyTaskTransition(null, {
+            ...cleanData,
+            id: uuidv4()
+        });
 
         // 4. Persistence
         await database.collection('tasks').insertOne(finalTask)
 
         // 5. Post-Insert Verification
-        try {
-            assertTaskInvariant(finalTask);
-        } catch (criticalError) {
-            return handleCORS(NextResponse.json({ error: 'Critical system error: Invariant violation' }, { status: 500 }))
-        }
+        assertTaskInvariant(finalTask);
 
         return handleCORS(NextResponse.json(finalTask))
     })

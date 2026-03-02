@@ -1,11 +1,15 @@
-import { handleCORS, rateLimit } from '@/lib/api-utils'
+import { NextResponse } from 'next/server'
+import { connectToMongo } from '@/lib/mongodb'
+import { handleCORS, withErrorLogging, rateLimit } from '@/lib/api-utils'
 import bcrypt from 'bcryptjs'
+
+export const runtime = 'nodejs';
 
 export async function POST(request, { params }) {
     const limiter = rateLimit(request, { limit: 5, windowMs: 60000 })
     if (limiter.blocked) return limiter.response
 
-    try {
+    return withErrorLogging(request, async () => {
         const { slug } = params
         const body = await request.json()
         const { password } = body
@@ -21,9 +25,7 @@ export async function POST(request, { params }) {
         }
 
         return handleCORS(NextResponse.json({ success: true }))
-    } catch (error) {
-        return handleCORS(NextResponse.json({ error: 'Internal server error', details: error.message }, { status: 500 }))
-    }
+    })
 }
 
 export async function OPTIONS() {

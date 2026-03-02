@@ -1,8 +1,6 @@
-import { NextResponse } from 'next/server'
-import { v4 as uuidv4 } from 'uuid'
-import bcrypt from 'bcryptjs'
-import { connectToMongo } from '@/lib/mongodb'
 import { handleCORS, withErrorLogging } from '@/lib/api-utils'
+
+export const runtime = 'nodejs';
 
 export async function POST(request) {
     return withErrorLogging(request, async () => {

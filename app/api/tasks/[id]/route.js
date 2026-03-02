@@ -5,6 +5,8 @@ import { applyTaskTransition, assertTaskInvariant } from '@/lib/lifecycleEngine'
 import { validateBody, rejectFields } from '@/lib/validation'
 import { TaskUpdateSchema } from '@/lib/schemas/task.schema'
 
+export const runtime = 'nodejs';
+
 export async function GET(request, { params }) {
     return withAuth(request, async () => {
         const { id: taskId } = params
@@ -59,12 +61,7 @@ export async function PUT(request, { params }) {
         }
 
         // 5. Apply Lifecycle Engine (Sole Authority)
-        let finalState;
-        try {
-            finalState = applyTaskTransition(current, cleanUpdate);
-        } catch (error) {
-            return handleCORS(NextResponse.json({ error: error.message }, { status: 400 }))
-        }
+        const finalState = applyTaskTransition(current, cleanUpdate);
 
         // 6. Atomic Update
         const result = await database.collection('tasks').updateOne(
@@ -92,17 +89,13 @@ export async function PUT(request, { params }) {
 
 export async function DELETE(request, { params }) {
     return withAuth(request, async () => {
-        try {
-            const { id: taskId } = params
-            const database = await connectToMongo()
-            const result = await database.collection('tasks').deleteOne({ id: taskId })
-            if (result.deletedCount === 0) {
-                return handleCORS(NextResponse.json({ error: 'Task not found or already deleted' }, { status: 404 }))
-            }
-            return handleCORS(NextResponse.json({ message: 'Task deleted' }))
-        } catch (error) {
-            return handleCORS(NextResponse.json({ error: 'Internal server error', details: error.message }, { status: 500 }))
+        const { id: taskId } = params
+        const database = await connectToMongo()
+        const result = await database.collection('tasks').deleteOne({ id: taskId })
+        if (result.deletedCount === 0) {
+            return handleCORS(NextResponse.json({ error: 'Task not found or already deleted' }, { status: 404 }))
         }
+        return handleCORS(NextResponse.json({ message: 'Task deleted' }))
     })
 }
 

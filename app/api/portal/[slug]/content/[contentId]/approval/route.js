@@ -5,11 +5,12 @@ import { validateBody } from '@/lib/validation'
 import { PortalContentApprovalSchema } from '@/lib/schemas/portal.schema'
 import { applyContentTransition, assertContentInvariant } from '@/lib/lifecycleEngine'
 
+export const runtime = 'nodejs';
+
 export async function PUT(request, { params }) {
     return withErrorLogging(request, async () => {
         const { slug, contentId } = params
         const body = await request.json()
-        const { topic_approval_status, blog_approval_status, blog_link } = body
         const database = await connectToMongo()
 
         const clientDoc = await database.collection('clients').findOne({ slug, is_active: true })
@@ -34,12 +35,7 @@ export async function PUT(request, { params }) {
         if (!item) return handleCORS(NextResponse.json({ error: 'Content item not found' }, { status: 404 }))
 
         // Execute centralized lifecycle logic
-        let finalState;
-        try {
-            finalState = applyContentTransition(item, cleanData);
-        } catch (error) {
-            return handleCORS(NextResponse.json({ error: error.message }, { status: 400 }))
-        }
+        const finalState = applyContentTransition(item, cleanData);
 
         // Atomic Update with Optimistic Locking
         const result = await database.collection('content_items').updateOne(

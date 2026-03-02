@@ -5,11 +5,12 @@ import { validateBody } from '@/lib/validation'
 import { PortalTaskApprovalSchema } from '@/lib/schemas/portal.schema'
 import { applyTaskTransition, assertTaskInvariant } from '@/lib/lifecycleEngine'
 
+export const runtime = 'nodejs';
+
 export async function PUT(request, { params }) {
     return withErrorLogging(request, async () => {
         const { slug, taskId } = params
         const body = await request.json()
-        const { client_approval, client_feedback_note } = body
         const database = await connectToMongo()
 
         const clientDoc = await database.collection('clients').findOne({ slug, is_active: true })
@@ -34,13 +35,7 @@ export async function PUT(request, { params }) {
         if (!task) return handleCORS(NextResponse.json({ error: 'Task not found' }, { status: 404 }))
 
         // Execute centralized lifecycle logic
-        let finalState;
-        try {
-            // Note: We use the engine to compute everything from the intent (client_approval)
-            finalState = applyTaskTransition(task, cleanData);
-        } catch (error) {
-            return handleCORS(NextResponse.json({ error: error.message }, { status: 400 }))
-        }
+        const finalState = applyTaskTransition(task, cleanData);
 
         // Atomic Update with Optimistic Locking
         const result = await database.collection('tasks').updateOne(

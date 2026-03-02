@@ -1,11 +1,13 @@
 import { NextResponse } from 'next/server'
 import { v4 as uuidv4 } from 'uuid'
 import { connectToMongo } from '@/lib/mongodb'
-import { handleCORS, withAuth, withErrorLogging } from '@/lib/api-utils'
+import { handleCORS, withAuth } from '@/lib/api-utils'
 import { applyContentTransition } from '@/lib/lifecycleEngine'
 import { safeURL, safeArray } from '@/lib/safe'
 import { validateBody } from '@/lib/validation'
 import { ContentSchema } from '@/lib/schemas/content.schema'
+
+export const runtime = 'nodejs';
 
 export async function GET(request) {
     return withAuth(request, async () => {
@@ -39,18 +41,12 @@ export async function POST(request) {
         const cleanData = validation.data
         const { blog_title, client_id } = cleanData
 
-        let item;
-        try {
-            // Use engine to initialize state with intent
-            item = applyContentTransition(null, {
-                id: uuidv4(),
-                client_id,
-                blog_title,
-                ...cleanData
-            });
-        } catch (error) {
-            return handleCORS(NextResponse.json({ error: error.message }, { status: 400 }))
-        }
+        const item = applyContentTransition(null, {
+            id: uuidv4(),
+            client_id,
+            blog_title,
+            ...cleanData
+        });
 
         await database.collection('content_items').insertOne(item)
         return handleCORS(NextResponse.json(item))

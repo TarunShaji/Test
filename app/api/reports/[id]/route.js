@@ -4,6 +4,8 @@ import { handleCORS, withAuth } from '@/lib/api-utils'
 import { validateBody, rejectFields } from '@/lib/validation'
 import { ReportSchema } from '@/lib/schemas/report.schema'
 
+export const runtime = 'nodejs';
+
 const FORBIDDEN_FIELDS = ['id', 'client_id', 'created_at'];
 
 export async function PUT(request, { params }) {
@@ -29,7 +31,6 @@ export async function PUT(request, { params }) {
         if (!current) return handleCORS(NextResponse.json({ error: 'Report not found' }, { status: 404 }))
 
         // 4. Concurrency Control: Optimistic Locking
-        // Note: For existing reports without updated_at, we skip the check but set it for future.
         if (body.updated_at && current.updated_at) {
             const clientTime = new Date(body.updated_at).getTime()
             const dbTime = new Date(current.updated_at).getTime()
@@ -64,18 +65,14 @@ export async function PUT(request, { params }) {
 
 export async function DELETE(request, { params }) {
     return withAuth(request, async () => {
-        try {
-            const { id: reportId } = params
-            const database = await connectToMongo()
+        const { id: reportId } = params
+        const database = await connectToMongo()
 
-            const result = await database.collection('reports').deleteOne({ id: reportId })
-            if (result.deletedCount === 0) {
-                return handleCORS(NextResponse.json({ error: 'Report not found or already deleted' }, { status: 404 }))
-            }
-            return handleCORS(NextResponse.json({ message: 'Report deleted' }))
-        } catch (error) {
-            return handleCORS(NextResponse.json({ error: 'Internal server error', details: error.message }, { status: 500 }))
+        const result = await database.collection('reports').deleteOne({ id: reportId })
+        if (result.deletedCount === 0) {
+            return handleCORS(NextResponse.json({ error: 'Report not found or already deleted' }, { status: 404 }))
         }
+        return handleCORS(NextResponse.json({ message: 'Report deleted' }))
     })
 }
 

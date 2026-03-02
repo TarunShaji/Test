@@ -1,9 +1,6 @@
-import { NextResponse } from 'next/server'
-import jwt from 'jsonwebtoken'
-import bcrypt from 'bcryptjs'
-import { cookies } from 'next/headers'
-import { connectToMongo } from '@/lib/mongodb'
 import { handleCORS, withErrorLogging, verifyToken } from '@/lib/api-utils'
+
+export const runtime = 'nodejs';
 
 const JWT_SECRET = process.env.JWT_SECRET
 

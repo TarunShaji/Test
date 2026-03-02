@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server'
 import { v4 as uuidv4 } from 'uuid'
 import { connectToMongo } from '@/lib/mongodb'
-import { handleCORS, withAuth, withErrorLogging } from '@/lib/api-utils'
+import { handleCORS, withAuth } from '@/lib/api-utils'
 import { safeURL, safeArray } from '@/lib/safe'
 import { validateBody } from '@/lib/validation'
 import { ReportSchema } from '@/lib/schemas/report.schema'
+
+export const runtime = 'nodejs';
 
 export async function GET(request) {
     return withAuth(request, async () => {

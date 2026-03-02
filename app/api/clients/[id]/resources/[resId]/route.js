@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { connectToMongo } from '@/lib/mongodb'
-import { handleCORS, withAuth, withErrorLogging } from '@/lib/api-utils'
+import { handleCORS, withAuth } from '@/lib/api-utils'
+
+export const runtime = 'nodejs';
 
 export async function PUT(request, { params }) {
     return withAuth(request, async () => {

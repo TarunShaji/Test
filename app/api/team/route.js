@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server'
 import { v4 as uuidv4 } from 'uuid'
 import { connectToMongo } from '@/lib/mongodb'
-import { handleCORS, withAuth, withErrorLogging } from '@/lib/api-utils'
+import { handleCORS, withAuth } from '@/lib/api-utils'
 import { validateBody } from '@/lib/validation'
 import { TeamMemberSchema } from '@/lib/schemas/team.schema'
+
+export const runtime = 'nodejs';
 
 export async function GET(request) {
     return withAuth(request, async () => {
@@ -14,35 +16,33 @@ export async function GET(request) {
     })
 }
 
-
 export async function POST(request) {
     return withAuth(request, async () => {
-        try {
-            const database = await connectToMongo()
-            const body = await request.json()
+        const database = await connectToMongo()
+        const body = await request.json()
 
-            const validation = validateBody(TeamMemberSchema, body)
-            if (!validation.success) {
-                return handleCORS(NextResponse.json(validation.error, { status: 400 }))
-            }
-
-            const { name, email, role } = validation.data
-            const id = uuidv4()
-
-            // Note: In this system, team members don't have passwords - they use dashboard auth (Staff)
-            const member = {
-                id,
-                name,
-                email,
-                role: role || 'SEO',
-                is_active: true,
-                created_at: new Date()
-            }
-
-            await database.collection('team_members').insertOne(member)
-            return handleCORS(NextResponse.json(member))
-        } catch (error) {
-            return handleCORS(NextResponse.json({ error: 'Internal server error', details: error.message }, { status: 500 }))
+        const validation = validateBody(TeamMemberSchema, body)
+        if (!validation.success) {
+            return handleCORS(NextResponse.json(validation.error, { status: 400 }))
         }
+
+        const { name, email, role } = validation.data
+        const id = uuidv4()
+
+        const member = {
+            id,
+            name,
+            email,
+            role: role || 'SEO',
+            is_active: true,
+            created_at: new Date()
+        }
+
+        await database.collection('team_members').insertOne(member)
+        return handleCORS(NextResponse.json(member))
     })
+}
+
+export async function OPTIONS() {
+    return handleCORS(new NextResponse(null, { status: 200 }))
 }

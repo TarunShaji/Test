@@ -2,7 +2,9 @@ import { NextResponse } from 'next/server'
 import { v4 as uuidv4 } from 'uuid'
 import bcrypt from 'bcryptjs'
 import { connectToMongo } from '@/lib/mongodb'
-import { handleCORS, withAuth, withErrorLogging } from '@/lib/api-utils'
+import { handleCORS, withAuth } from '@/lib/api-utils'
+
+export const runtime = 'nodejs';
 
 export async function POST(request) {
     return withAuth(request, async () => {
@@ -11,18 +13,12 @@ export async function POST(request) {
         }
         const database = await connectToMongo()
 
-        // Core hardening: ensure idempotency by resetting collections optionally
-        // or checking for existing data. For a thorough "seed", we'll clear sample data.
-
-        // Only clear if specifically requested or if you want a clean slate every time.
-        // For this hardening, we'll make it clean the main collections to avoid duplicates.
         await database.collection('team_members').deleteMany({})
         await database.collection('clients').deleteMany({})
         await database.collection('tasks').deleteMany({})
         await database.collection('reports').deleteMany({})
         await database.collection('content_items').deleteMany({})
 
-        // Create admin user
         const passwordHash = await bcrypt.hash('admin123', 10)
         const portalHashBehno = await bcrypt.hash('behno2025', 10)
         const adminId = uuidv4()
@@ -34,7 +30,6 @@ export async function POST(request) {
             { id: uuidv4(), name: 'James Lee', email: 'james@agency.com', password_hash: await bcrypt.hash('pass123', 10), is_active: true, created_at: new Date() },
         ])
 
-        // Create sample clients
         const newClientIds = [uuidv4(), uuidv4(), uuidv4()]
         const now = new Date()
         await database.collection('clients').insertMany([

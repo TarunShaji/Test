@@ -3,6 +3,8 @@ import { connectToMongo } from '@/lib/mongodb'
 import { handleCORS, withErrorLogging } from '@/lib/api-utils'
 import { safeArray } from '@/lib/safe'
 
+export const runtime = 'nodejs';
+
 export async function GET(request, { params }) {
     return withErrorLogging(request, async () => {
         const { slug } = params

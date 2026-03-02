@@ -5,6 +5,8 @@ import { applyContentTransition, assertContentInvariant } from '@/lib/lifecycleE
 import { validateBody, rejectFields } from '@/lib/validation'
 import { ContentUpdateSchema } from '@/lib/schemas/content.schema'
 
+export const runtime = 'nodejs';
+
 const FORBIDDEN_FIELDS = [
     'topic_approval_date',
     'blog_approval_date',
@@ -74,25 +76,21 @@ export async function PUT(request, { params }) {
             return handleCORS(NextResponse.json({ error: 'Critical system error: Invariant violation' }, { status: 500 }))
         }
 
-        const { _id, ...responseBody } = updated
+        const { _id, ...responseBody } = updated || {}
         return handleCORS(NextResponse.json(responseBody))
     })
 }
 
 export async function DELETE(request, { params }) {
     return withAuth(request, async () => {
-        try {
-            const { id: contentId } = params
-            const database = await connectToMongo()
+        const { id: contentId } = params
+        const database = await connectToMongo()
 
-            const result = await database.collection('content_items').deleteOne({ id: contentId })
-            if (result.deletedCount === 0) {
-                return handleCORS(NextResponse.json({ error: 'Content item not found or already deleted' }, { status: 404 }))
-            }
-            return handleCORS(NextResponse.json({ message: 'Content item deleted' }))
-        } catch (error) {
-            return handleCORS(NextResponse.json({ error: 'Internal server error', details: error.message }, { status: 500 }))
+        const result = await database.collection('content_items').deleteOne({ id: contentId })
+        if (result.deletedCount === 0) {
+            return handleCORS(NextResponse.json({ error: 'Content item not found or already deleted' }, { status: 404 }))
         }
+        return handleCORS(NextResponse.json({ message: 'Content item deleted' }))
     })
 }
 

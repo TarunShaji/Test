@@ -5,6 +5,8 @@ import { handleCORS, withAuth } from '@/lib/api-utils'
 import { validateBody, rejectFields } from '@/lib/validation'
 import { ClientSchema } from '@/lib/schemas/client.schema'
 
+export const runtime = 'nodejs';
+
 export async function GET(request, { params }) {
     return withAuth(request, async () => {
         const { id } = params
@@ -65,22 +67,18 @@ export async function PUT(request, { params }) {
 
 export async function DELETE(request, { params }) {
     return withAuth(request, async () => {
-        try {
-            const { id: clientId } = params
-            const database = await connectToMongo()
+        const { id: clientId } = params
+        const database = await connectToMongo()
 
-            const result = await database.collection('clients').deleteOne({ id: clientId })
-            if (result.deletedCount === 0) {
-                return handleCORS(NextResponse.json({ error: 'Client not found or already deleted' }, { status: 404 }))
-            }
-            // Cascade delete (safe to run even if counts are 0)
-            await database.collection('tasks').deleteMany({ client_id: clientId })
-            await database.collection('reports').deleteMany({ client_id: clientId })
-
-            return handleCORS(NextResponse.json({ message: 'Client deleted' }))
-        } catch (error) {
-            return handleCORS(NextResponse.json({ error: 'Internal server error', details: error.message }, { status: 500 }))
+        const result = await database.collection('clients').deleteOne({ id: clientId })
+        if (result.deletedCount === 0) {
+            return handleCORS(NextResponse.json({ error: 'Client not found or already deleted' }, { status: 404 }))
         }
+        // Cascade delete (safe to run even if counts are 0)
+        await database.collection('tasks').deleteMany({ client_id: clientId })
+        await database.collection('reports').deleteMany({ client_id: clientId })
+
+        return handleCORS(NextResponse.json({ message: 'Client deleted' }))
     })
 }
 
