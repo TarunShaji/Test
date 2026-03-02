@@ -72,6 +72,7 @@ export default function ClientDetailPage() {
   const [selectedContent, setSelectedContent] = useState(new Set())
   const [bulkDeleting, setBulkDeleting] = useState(false)
   const [bulkDeletingContent, setBulkDeletingContent] = useState(false)
+  const addContentInputRef = useRef(null)
 
   useEffect(() => {
     const savedTasks = localStorage.getItem('client_tasks_col_order_v2')
@@ -82,12 +83,22 @@ export default function ClientDetailPage() {
       setTaskColOrder(['selection', 'title', 'category', 'status', 'priority', 'eta', 'assigned', 'link', 'internal_approval', 'send_link', 'client_approval', 'client_feedback', 'actions'])
     }
 
-    const savedContent = localStorage.getItem('client_content_col_order_v2')
+    // Always nuke the old v2 key so stale orders without blog_doc are gone
+    localStorage.removeItem('client_content_col_order_v2')
+
+    const savedContent = localStorage.getItem('client_content_col_order_v3')
     const parsedContent = safeJSON(savedContent)
+    const defaultContentCols = ['selection', 'week', 'title', 'keyword', 'writer', 'topic_approval', 'blog_status', 'blog_doc', 'blog_internal_approval', 'send_link', 'blog_approval', 'blog_feedback', 'link', 'published', 'comments', 'actions']
     if (parsedContent && Array.isArray(parsedContent)) {
-      setContentColOrder(parsedContent.filter(c => c !== 'client').includes('selection') ? parsedContent.filter(c => c !== 'client') : ['selection', ...parsedContent.filter(c => c !== 'selection' && c !== 'client')])
+      let cols = parsedContent.filter(c => c !== 'client' && c !== 'outline')
+      // Inject blog_doc before blog_internal_approval if not already present
+      if (!cols.includes('blog_doc')) {
+        const idx = cols.indexOf('blog_internal_approval')
+        cols = idx >= 0 ? [...cols.slice(0, idx), 'blog_doc', ...cols.slice(idx)] : [...cols, 'blog_doc']
+      }
+      setContentColOrder(cols.includes('selection') ? cols : ['selection', ...cols.filter(c => c !== 'selection')])
     } else {
-      setContentColOrder(['selection', 'week', 'title', 'keyword', 'writer', 'outline', 'topic_approval', 'blog_status', 'blog_internal_approval', 'send_link', 'blog_approval', 'blog_feedback', 'link', 'published', 'comments', 'actions'])
+      setContentColOrder(defaultContentCols)
     }
   }, [])
   const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || ''
@@ -477,7 +488,7 @@ export default function ClientDetailPage() {
         const oldIndex = items.indexOf(active.id)
         const newIndex = items.indexOf(over.id)
         const updated = arrayMove(items, oldIndex, newIndex)
-        localStorage.setItem('client_content_col_order_v2', JSON.stringify(updated))
+        localStorage.setItem('client_content_col_order_v3', JSON.stringify(updated))
         return updated
       })
     }
@@ -644,33 +655,27 @@ export default function ClientDetailPage() {
             {colId === 'writer' && <EditableCell value={item.writer} onSave={v => updateContent(item.id, 'writer', v)} placeholder="Writer" />}
             {colId === 'outline' && <EditableCell value={item.outline_status} type="select" options={OUTLINE_STATUSES} onSave={v => updateContent(item.id, 'outline_status', v)} />}
             {colId === 'topic_approval' && (
-              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border cursor-pointer hover:ring-1 hover:ring-blue-200 ${topicApprovalColors[item.topic_approval_status] || 'bg-gray-100 text-gray-500 border-gray-200'}`}
-                onClick={() => {
-                  const opts = TOPIC_APPROVALS
-                  const idx = opts.indexOf(item.topic_approval_status || 'Pending')
-                  const next = opts[(idx + 1) % opts.length]
-                  updateContent(item.id, 'topic_approval_status', next)
-                }}>
-                {item.topic_approval_status || 'Pending'}
-              </span>
+              <EditableCell
+                value={item.topic_approval_status || 'Pending'}
+                type="topic_approval"
+                options={TOPIC_APPROVALS}
+                onSave={v => updateContent(item.id, 'topic_approval_status', v)}
+              />
             )}
             {colId === 'blog_status' && (
-              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border cursor-pointer hover:ring-1 hover:ring-blue-200 ${blogStatusColors[item.blog_status] || 'bg-gray-100 text-gray-600 border-gray-200'}`}
-                onClick={() => {
-                  const opts = BLOG_STATUSES
-                  const idx = opts.indexOf(item.blog_status || 'Draft')
-                  const next = opts[(idx + 1) % opts.length]
-                  updateContent(item.id, 'blog_status', next)
-                }}>
-                {item.blog_status || 'Draft'}
-              </span>
+              <EditableCell
+                value={item.blog_status || 'Draft'}
+                type="blog_status"
+                options={BLOG_STATUSES}
+                onSave={v => updateContent(item.id, 'blog_status', v)}
+              />
             )}
             {colId === 'blog_internal_approval' && (
               <EditableCell
                 value={item.blog_internal_approval || 'Pending'}
                 type="internal_approval"
                 options={CONTENT_INTERNAL_APPROVALS}
-                disabled={!item.blog_link}
+                disabled={!item.blog_doc_link}
                 onSave={v => updateContent(item.id, 'blog_internal_approval', v)}
               />
             )}
@@ -681,7 +686,7 @@ export default function ClientDetailPage() {
                 className={`h-7 px-2 text-[10px] uppercase tracking-wider font-bold ${item.client_link_visible_blog ? 'text-green-600' : ''}`}
                 disabled={
                   item.blog_internal_approval !== 'Approved' ||
-                  !item.blog_link ||
+                  !item.blog_doc_link ||
                   item.client_link_visible_blog === true
                 }
                 onClick={() => publishContent(item.id)}
@@ -701,6 +706,7 @@ export default function ClientDetailPage() {
                 ) : <span className="text-gray-300 text-xs">—</span>}
               </div>
             )}
+            {colId === 'blog_doc' && <LinkCell value={item.blog_doc_link} onSave={v => updateContent(item.id, 'blog_doc_link', v)} />}
             {colId === 'link' && <LinkCell value={item.blog_link} onSave={v => updateContent(item.id, 'blog_link', v)} />}
             {colId === 'published' && <EditableCell value={item.published_date} type="date" onSave={v => updateContent(item.id, 'published_date', v)} />}
             {colId === 'comments' && <EditableCell value={item.comments} onSave={v => updateContent(item.id, 'comments', v)} placeholder="Notes..." />}
@@ -726,9 +732,9 @@ export default function ClientDetailPage() {
     selection: '',
     week: 'Week', title: 'Blog Title', keyword: 'Keyword', writer: 'Writer',
     outline: 'Outline Status', topic_approval: 'Topic Approval', blog_status: 'Blog Status',
-    blog_internal_approval: 'Internal Approval', send_link: 'Send Link',
+    blog_doc: 'Blog Doc', blog_internal_approval: 'Internal Approval', send_link: 'Send Link',
     blog_approval: 'Client Approval', blog_feedback: 'Feedback',
-    link: 'Blog Link', published: 'Published', comments: 'Notes', actions: ''
+    link: 'Live Link', published: 'Published', comments: 'Notes', actions: ''
   }
 
   return (
@@ -891,6 +897,13 @@ export default function ClientDetailPage() {
                 </div>
               )}
             </div>
+            <Button
+              size="sm"
+              className="gap-1.5 h-8"
+              onClick={() => { addContentInputRef.current?.focus(); addContentInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }) }}
+            >
+              <Plus className="w-4 h-4" /> Add Content
+            </Button>
           </div>
           <div className="bg-white border border-gray-200 rounded-lg overflow-auto shadow-sm">
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleContentColDragEnd} modifiers={[restrictToHorizontalAxis]}>
@@ -924,6 +937,7 @@ export default function ClientDetailPage() {
                     <td className="px-2 py-2"></td>
                     <td className="px-3 py-2" colSpan={2}>
                       <input
+                        ref={addContentInputRef}
                         type="text" value={newContent.blog_title}
                         onChange={e => setNewContent(n => ({ ...n, blog_title: e.target.value }))}
                         onKeyDown={e => e.key === 'Enter' && addContent()}

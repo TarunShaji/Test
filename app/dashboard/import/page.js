@@ -1,6 +1,5 @@
 'use client'
 import { useState } from 'react'
-import { parse, isValid, format } from 'date-fns'
 import useSWR from 'swr'
 import { apiFetch, swrFetcher } from '@/lib/auth'
 import { safeArray } from '@/lib/safe'
@@ -10,22 +9,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Upload, CheckCircle, AlertCircle, Loader2, Key, FileText, ListTodo } from 'lucide-react'
+import { rowToContent, getMappedHeaders } from '@/lib/import/content-mapping'
+import { rowToTask } from '@/lib/import/task-mapping'
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// SHARED UTILITIES
-// ═══════════════════════════════════════════════════════════════════════════════
 
-/** Normalize a column header: lowercase, trim, collapse whitespace */
-const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim()
-
-/** Find the first matching header from a list of keyword patterns */
-const findHeader = (headers, keywords) =>
-  headers.find(h => keywords.some(k => norm(h).includes(k))) || null
-
-/** Safe string — empty string becomes null */
-const str = (v) => { const s = String(v || '').trim(); return s || null }
-
-/** RFC-4180 compliant CSV/TSV parser. Handles quoted fields, embedded newlines, mixed spacing. */
 function parseSpreadsheet(text) {
   if (!text || !text.trim()) return null
 
@@ -90,173 +77,6 @@ function parseSpreadsheet(text) {
   return { headers: validHeaders, rows }
 }
 
-/** Flexible date parsing from any spreadsheet date format */
-function parseDate(s) {
-  if (!s) return null
-  const raw = String(s).trim()
-  if (!raw) return null
-  const fmts = [
-    'yyyy-MM-dd', 'dd-MM-yyyy', 'MM-dd-yyyy', 'dd/MM/yyyy', 'MM/dd/yyyy',
-    'MMM d, yyyy', 'MMMM d, yyyy', 'd MMM yyyy', 'd MMMM yyyy',
-    'yyyy/MM/dd', 'd-M-yyyy', 'M-d-yyyy', 'd/M/yyyy', 'M/d/yyyy',
-  ]
-  for (const f of fmts) {
-    try { const d = parse(raw, f, new Date()); if (isValid(d)) return format(d, 'yyyy-MM-dd') } catch (e) { /* skip */ }
-  }
-  const d = new Date(raw)
-  if (!isNaN(d.getTime())) return format(d, 'yyyy-MM-dd')
-  return null
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// TASK ROW → SCHEMA
-// Only sets fields that exist in TaskCreateSchema.
-// Schema: title, client_id, status, category, priority, link_url, assigned_to, eta_end, remarks
-// ═══════════════════════════════════════════════════════════════════════════════
-
-const TASK_STATUS_MAP = {
-  'implemented/ completed': 'Completed', 'implemented/completed': 'Completed',
-  'completed': 'Completed', 'complete': 'Completed', 'done': 'Completed', 'fixed': 'Completed',
-  'work in progress': 'In Progress', 'in progress': 'In Progress', 'wip': 'In Progress',
-  'to be approved': 'Pending Review', 'pending approval': 'Pending Review',
-  'in review': 'Pending Review', 'review': 'Pending Review',
-  'recurring': 'Recurring', 'blocked': 'Blocked',
-  'to be started': 'To Be Started', 'not started': 'To Be Started',
-  'pending': 'To Be Started', 'open': 'To Be Started', 'to do': 'To Be Started',
-}
-function mapTaskStatus(s) {
-  if (!s) return 'To Be Started'
-  return TASK_STATUS_MAP[norm(s)] || 'To Be Started'
-}
-
-/**
- * Maps a spreadsheet row → task object (only schema-valid fields).
- * Returns null if no title found.
- */
-function rowToTask(row, headers, clientId) {
-  const h = (kws) => findHeader(headers, kws)
-
-  // Title — required
-  const titleField = h(['to-do', 'todo', 'task name', 'task title', 'task', 'title', 'name', 'action item', 'action items', 'item', 'description', 'deliverable']) || headers[0]
-  const title = str(row[titleField])
-  if (!title) return null
-
-  // Only include fields that are in the schema
-  const task = { client_id: clientId, title }
-
-  const statusField = h(['status'])
-  if (statusField && str(row[statusField])) task.status = mapTaskStatus(row[statusField])
-
-  const catField = h(['category', 'type', 'group', 'service', 'industry'])
-  if (catField && str(row[catField])) task.category = str(row[catField])
-
-  const priorityField = h(['priority'])
-  const pRaw = str(row[priorityField || ''])
-  if (pRaw && ['P0', 'P1', 'P2', 'P3'].includes(pRaw.toUpperCase())) task.priority = pRaw.toUpperCase()
-
-  const linkField = h(['link', 'url', 'live link', 'page url'])
-  if (linkField) {
-    const rawLink = str(row[linkField])
-    if (rawLink) {
-      // Handles plain URLs or "Anchor Text (https://...)" format from paste interceptor
-      const urlMatch = rawLink.match(/https?:\/\/[^\s'"<>)]+/)
-      if (urlMatch) task.link_url = urlMatch[0]
-    }
-  }
-
-  const assignedField = h(['assigned to', 'assigned', 'owner', 'assignee', 'team member'])
-  if (assignedField && str(row[assignedField])) task.assigned_to = str(row[assignedField])
-
-  const etaField = h(['eta', 'due', 'deadline', 'due date', 'date', 'timeline', 'completion date', 'required by', 'required'])
-  if (etaField && str(row[etaField])) task.eta_end = parseDate(row[etaField])
-
-  const remarksField = h(['remark', 'remarks', 'note', 'notes', 'comment', 'comments', 'detail', 'details', 'feedback'])
-  if (remarksField && str(row[remarksField])) task.remarks = str(row[remarksField])
-
-  return task
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// CONTENT ROW → SCHEMA
-// Only sets fields that exist in ContentSchema.
-// Schema: blog_title, client_id, primary_keyword, week, writer, blog_status,
-//         blog_type, blog_link, published_date, topic_approval_status, blog_approval_status
-// ═══════════════════════════════════════════════════════════════════════════════
-
-const BLOG_STATUS_MAP = {
-  'draft': 'Draft', 'in progress': 'In Progress', 'wip': 'In Progress',
-  'sent for approval': 'Sent for Approval', 'sent': 'Sent for Approval',
-  'in review': 'Sent for Approval', 'review': 'Sent for Approval',
-  'published': 'Published', 'live': 'Published', 'done': 'Published',
-}
-function mapBlogStatus(s) {
-  if (!s) return 'Draft'
-  return BLOG_STATUS_MAP[norm(s)] || 'Draft'
-}
-
-const OUTLINE_STATUS_MAP = {
-  'pending': 'Pending', 'submitted': 'Submitted', 'approved': 'Approved',
-  'rejected': 'Rejected', 'done': 'Submitted',
-}
-function mapOutlineStatus(s) {
-  if (!s) return 'Pending'
-  return OUTLINE_STATUS_MAP[norm(s)] || 'Pending'
-}
-
-/**
- * Maps a spreadsheet row → content item (only schema-valid fields).
- * Returns null if no blog_title found.
- */
-function rowToContent(row, headers, clientId) {
-  const h = (kws) => findHeader(headers, kws)
-
-  // Title — required
-  const titleField = h(['blog title', 'blog name', 'blog topic', 'title', 'topic', 'name', 'article'])
-  const blog_title = str(row[titleField || headers[0]])
-  if (!blog_title) return null
-
-  const item = { client_id: clientId, blog_title }
-
-  // Week
-  const weekField = h(['week'])
-  if (weekField && str(row[weekField])) item.week = str(row[weekField])
-
-  // Primary keyword
-  const kwField = h(['primary keyword', 'primary keywords', 'keyword', 'main keyword'])
-  if (kwField && str(row[kwField])) item.primary_keyword = str(row[kwField])
-
-  // Blog type
-  const typeField = h(['blog type', 'type', 'content type', 'content goal', 'goal'])
-  if (typeField && str(row[typeField])) item.blog_type = str(row[typeField])
-
-  // Writer / Intern
-  const writerField = h(['intern name', 'intern', 'writer', 'author', 'assigned'])
-  if (writerField && str(row[writerField])) item.writer = str(row[writerField])
-
-  // outline_status is not in ContentSchema — skip to avoid validation errors
-
-  // Blog status
-  const statusField = h(['blog status', 'status', 'intern status'])
-  if (statusField && str(row[statusField])) item.blog_status = mapBlogStatus(row[statusField])
-
-  // Blog link — regex-extract the first http(s) URL from the cell
-  // handles values like "https://example.com/slug 26/11/25" cleanly
-  const linkField = h(['live link', 'blog link', 'publishing link', 'link', 'url'])
-  if (linkField) {
-    const rawLink = str(row[linkField])
-    if (rawLink) {
-      // Handles plain URLs or "Anchor Text (https://...)" format from paste interceptor
-      const urlMatch = rawLink.match(/https?:\/\/[^\s'"<>)]+/)
-      if (urlMatch) item.blog_link = urlMatch[0]
-    }
-  }
-
-  // Published date
-  const pubField = h(['published date', 'date published', 'publishing date', 'publication date', 'date of publication', 'republished date'])
-  if (pubField && str(row[pubField])) item.published_date = parseDate(row[pubField])
-
-  return item
-}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MAIN PAGE
@@ -307,8 +127,9 @@ function ImportShell({
   rawData, setRawData, parsed, parseError,
   onFile, onParse, onImport,
   importing, result, setResult,
-  previewCols, // optional: max columns to show in preview
+  previewCols,
   actionLabel,
+  customPreview,
 }) {
   const [pasteMode, setPasteMode] = useState(false)
 
@@ -401,10 +222,12 @@ function ImportShell({
                       const cells = Array.from(tr.querySelectorAll('td, th'))
                       return cells.map(td => {
                         const link = td.querySelector('a')
-                        let text = td.innerText.trim()
-                        if (link && link.href && !text.includes(link.href)) {
-                          // Format as "Anchor Text (URL)" so our mapping functions can extract it
-                          return `${text} (${link.href})`
+                        const text = (td.innerText || td.textContent || '').trim()
+                        // If the cell is a hyperlink, prefer the href URL directly.
+                        // This makes the URL visible and clickable in the textarea.
+                        // The import mapping still extracts URLs via regex as a fallback.
+                        if (link && link.href && link.href.startsWith('http')) {
+                          return link.href
                         }
                         return text
                       }).join('\t')
@@ -440,7 +263,7 @@ function ImportShell({
       </Card>
 
       {/* Right: preview / format guide */}
-      {parsed ? (
+      {customPreview ? customPreview : parsed ? (
         <Card className="border border-gray-200">
           <CardHeader>
             <CardTitle className="text-base">
@@ -469,7 +292,7 @@ function ImportShell({
               </table>
             </div>
             <div className="px-4 py-3 border-t border-gray-100 bg-gray-50 text-xs text-gray-500">
-              <span className="font-medium">{parsed.validCount ?? parsed.rows.length}</span> valid rows · <span className="font-medium">{parsed.headers.length}</span> columns detected
+              <span className="font-medium">{parsed.validCount ?? parsed.rows.length}</span> valid rows
             </div>
           </CardContent>
         </Card>
@@ -612,10 +435,20 @@ function TaskCSVImport({ clients }) {
 // CONTENT CALENDAR CSV IMPORT
 // ═══════════════════════════════════════════════════════════════════════════════
 
+
+// Schema field → display label (matches the dashboard UI 1:1)
+const CONTENT_PREVIEW_COLS = [
+  { field: 'week', label: 'Week' },
+  { field: 'blog_title', label: 'Blog Title' },
+  { field: 'blog_doc_link', label: 'Blog Doc' },
+  { field: 'blog_link', label: 'Blog Link' },
+]
+
 function ContentCSVImport({ clients }) {
   const [selectedClient, setSelectedClient] = useState('__none__')
   const [rawData, setRawData] = useState('')
   const [parsed, setParsed] = useState(null)
+  const [mappedRows, setMappedRows] = useState([])
   const [parseError, setParseError] = useState('')
   const [importing, setImporting] = useState(false)
   const [result, setResult] = useState(null)
@@ -624,12 +457,22 @@ function ContentCSVImport({ clients }) {
     setParseError('')
     try {
       const p = parseSpreadsheet(text)
-      if (!p) { setParseError('Could not parse. Make sure there is a header row and at least one data row.'); setParsed(null); return }
-      const valid = p.rows.map(r => rowToContent(r, p.headers, 'dummy')).filter(Boolean)
-      p.validCount = valid.length
-      if (valid.length === 0) { p.unsupported = true; p.unsupportedMsg = 'No rows with a recognisable blog title column found. Rename your column to "Blog Title", "Topic", or "Title".' }
-      setParsed(p)
-    } catch (e) { setParseError('Parse error: ' + (e?.message || 'Unknown error')); setParsed(null) }
+      if (!p) { setParseError('Could not parse. Make sure there is a header row and at least one data row.'); setParsed(null); setMappedRows([]); return }
+
+      console.log('[content-import] 📋 Raw sheet columns:', p.headers)
+
+      const mapped = p.rows.map(r => rowToContent(r, p.headers, 'preview')).filter(Boolean)
+      console.log('[content-import] ✅ Mapped', mapped.length, 'of', p.rows.length, 'rows | Sample:', mapped[0])
+
+      if (mapped.length === 0) {
+        setParsed({ ...p, validCount: 0, unsupported: true, unsupportedMsg: 'No rows with a recognisable "Blog Title" or "Title" column found.' })
+        setMappedRows([])
+        return
+      }
+
+      setParsed({ ...p, validCount: mapped.length })
+      setMappedRows(mapped)
+    } catch (e) { setParseError('Parse error: ' + (e?.message || 'Unknown error')); setParsed(null); setMappedRows([]) }
   }
 
   const handleFile = async (e) => {
@@ -643,8 +486,9 @@ function ContentCSVImport({ clients }) {
     if (!parsed || selectedClient === '__none__') return
     setImporting(true); setResult(null)
     const items = safeArray(parsed.rows).map(r => rowToContent(r, parsed.headers, selectedClient)).filter(Boolean)
+    console.log('[content-import] 🚀 Sending', items.length, 'items | First item:', items[0])
     if (items.length === 0) {
-      setResult({ success: 0, failed: parsed.rows.length, total: parsed.rows.length, error: 'No valid content items found — ensure your spreadsheet has a "Blog Title" or "Topic" column.' })
+      setResult({ success: 0, failed: parsed.rows.length, total: parsed.rows.length, error: 'No valid content items found — ensure your spreadsheet has a "Blog Title" column.' })
       setImporting(false); return
     }
     try {
@@ -652,11 +496,48 @@ function ContentCSVImport({ clients }) {
       let data = {}; try { data = await res.json() } catch (e) { /* ignore */ }
       if (res.ok) {
         setResult({ success: data.imported ?? items.length, failed: data.failed ?? 0, total: items.length, errors: safeArray(data.errors) })
-        setParsed(null); setRawData('')
+        setParsed(null); setMappedRows([]); setRawData('')
       } else { setResult({ success: 0, failed: items.length, total: items.length, error: data.error || `Server error (${res.status})` }) }
     } catch (e) { setResult({ success: 0, failed: 0, total: 0, error: 'Network error: ' + (e?.message || 'Could not reach server') }) }
     finally { setImporting(false) }
   }
+
+  const mappedPreview = mappedRows.length > 0 && (
+    <Card className="border border-gray-200">
+      <CardHeader>
+        <CardTitle className="text-base">
+          Preview <span className="text-xs font-normal text-gray-400">(exactly what will be saved · {mappedRows.length} rows)</span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="p-0">
+        <div className="overflow-auto max-h-80">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="bg-gray-50 border-b">
+                {CONTENT_PREVIEW_COLS.map(c => (
+                  <th key={c.field} className="px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap">{c.label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {mappedRows.slice(0, 8).map((row, i) => (
+                <tr key={i} className="hover:bg-gray-50">
+                  {CONTENT_PREVIEW_COLS.map(c => (
+                    <td key={c.field} className="px-3 py-1.5 text-gray-700 max-w-[200px] truncate" title={row[c.field] || ''}>
+                      {row[c.field] || <span className="text-gray-300 italic">—</span>}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="px-4 py-3 border-t border-gray-100 bg-gray-50 text-xs text-gray-500">
+          <span className="font-medium">{mappedRows.length}</span> rows ready to import
+        </div>
+      </CardContent>
+    </Card>
+  )
 
   return (
     <ImportShell
@@ -675,6 +556,7 @@ function ContentCSVImport({ clients }) {
       importing={importing}
       result={result}
       setResult={setResult}
+      customPreview={mappedPreview}
     />
   )
 }

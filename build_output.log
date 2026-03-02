@@ -1,0 +1,77 @@
+
+> nextjs-mongo-template@0.1.0 build
+> next build
+
+  ▲ Next.js 14.2.3
+  - Environments: .env
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully
+   Linting and checking validity of types ...
+ ⨯ ESLint must be installed in order to run during builds: yarn add --dev eslint
+   Collecting page data ...
+   Generating static pages (0/32) ...
+   Generating static pages (8/32) 
+   Generating static pages (16/32) 
+   Generating static pages (24/32) 
+ ✓ Generating static pages (32/32)
+   Finalizing page optimization ...
+   Collecting build traces ...
+
+Route (app)                                          Size     First Load JS
+┌ ○ /                                                482 B          87.5 kB
+├ ○ /_not-found                                      871 B          87.9 kB
+├ ƒ /api                                             0 B                0 B
+├ ƒ /api/admin/update-email                          0 B                0 B
+├ ƒ /api/auth/login                                  0 B                0 B
+├ ƒ /api/auth/logout                                 0 B                0 B
+├ ƒ /api/auth/me                                     0 B                0 B
+├ ƒ /api/auth/register                               0 B                0 B
+├ ƒ /api/clickup/import                              0 B                0 B
+├ ƒ /api/clickup/lists                               0 B                0 B
+├ ƒ /api/clickup/workspaces                          0 B                0 B
+├ ƒ /api/clients                                     0 B                0 B
+├ ƒ /api/clients/[id]                                0 B                0 B
+├ ƒ /api/clients/[id]/resources                      0 B                0 B
+├ ƒ /api/clients/[id]/resources/[resId]              0 B                0 B
+├ ƒ /api/content                                     0 B                0 B
+├ ƒ /api/content/[id]                                0 B                0 B
+├ ƒ /api/content/[id]/publish                        0 B                0 B
+├ ƒ /api/content/bulk                                0 B                0 B
+├ ƒ /api/portal/[slug]                               0 B                0 B
+├ ƒ /api/portal/[slug]/auth                          0 B                0 B
+├ ƒ /api/portal/[slug]/content/[contentId]/approval  0 B                0 B
+├ ƒ /api/portal/[slug]/tasks/[taskId]/approval       0 B                0 B
+├ ƒ /api/reports                                     0 B                0 B
+├ ƒ /api/reports/[id]                                0 B                0 B
+├ ƒ /api/seed                                        0 B                0 B
+├ ƒ /api/stats                                       0 B                0 B
+├ ƒ /api/tasks                                       0 B                0 B
+├ ƒ /api/tasks/[id]                                  0 B                0 B
+├ ƒ /api/tasks/[id]/publish                          0 B                0 B
+├ ƒ /api/tasks/bulk                                  0 B                0 B
+├ ƒ /api/tasks/bulk-update                           0 B                0 B
+├ ƒ /api/team                                        0 B                0 B
+├ ƒ /api/team/[id]                                   0 B                0 B
+├ ƒ /api/telemetry                                   0 B                0 B
+├ ○ /dashboard                                       9.65 kB         139 kB
+├ ○ /dashboard/clients                               137 B          87.1 kB
+├ ƒ /dashboard/clients/[id]                          11.8 kB         173 kB
+├ ○ /dashboard/content                               6.38 kB         165 kB
+├ ○ /dashboard/import                                14 kB           143 kB
+├ ○ /dashboard/reports                               3.09 kB         134 kB
+├ ○ /dashboard/tasks                                 8.38 kB         155 kB
+├ ○ /dashboard/team                                  3.47 kB         134 kB
+├ ○ /login                                           3.25 kB         100 kB
+└ ƒ /portal/[slug]                                   9.72 kB         141 kB
++ First Load JS shared by all                        87 kB
+  ├ chunks/23-30992d59fb6cfd70.js                    31.5 kB
+  ├ chunks/fd9d1056-75eb0bf70ba5c93a.js              53.6 kB
+  └ other shared chunks (total)                      1.9 kB
+
+
+ƒ Middleware                                         27 kB
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+

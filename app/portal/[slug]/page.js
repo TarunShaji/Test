@@ -267,6 +267,9 @@ export default function ClientPortalPage() {
   const [portalPassword, setPortalPassword] = useState('')
   const [passwordError, setPasswordError] = useState('')
   const [collapsed, setCollapsed] = useState({})
+  const [showAddResource, setShowAddResource] = useState(false)
+  const [resourceForm, setResourceForm] = useState({ name: '', url: '' })
+  const [addingResource, setAddingResource] = useState(false)
 
   const portalFetcher = async ([url, slug, pwd]) => {
     const headers = { 'Content-Type': 'application/json' }
@@ -324,6 +327,27 @@ export default function ClientPortalPage() {
 
   const handleApprovalUpdate = (taskId, val) => handleUpdate('task', taskId, 'client_approval', val)
   const handleContentApprovalUpdate = (contentId, field, val) => handleUpdate('content', contentId, field, val)
+
+  const addResourceFromPortal = async (e) => {
+    e.preventDefault()
+    if (!resourceForm.name.trim() || !resourceForm.url.trim()) return
+    setAddingResource(true)
+    try {
+      const res = await fetch(`/api/clients/${client?.id}/resources`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-portal-slug': slug, 'x-portal-password': portalPassword || '' },
+        body: JSON.stringify({ name: resourceForm.name.trim(), url: resourceForm.url.trim(), type: 'link', category: 'Shared' })
+      })
+      if (res.ok) {
+        const newRes = await res.json()
+        mutate(['/api/portal', slug, portalPassword], (cur) => cur ? { ...cur, resources: [...safeArray(cur.resources), newRes] } : cur, false)
+        setResourceForm({ name: '', url: '' })
+        setShowAddResource(false)
+      } else {
+        alert('Failed to add resource')
+      }
+    } catch { alert('Network error') } finally { setAddingResource(false) }
+  }
 
   const toggleCategory = (cat) => setCollapsed(c => ({ ...c, [cat]: !c[cat] }))
 
@@ -549,163 +573,210 @@ export default function ClientPortalPage() {
             ) : (
               <div className="bg-white rounded-xl border border-gray-200 overflow-auto">
                 <table className="w-full text-sm" style={{ minWidth: '1050px' }}>
-                <thead>
-                  <tr className="bg-gray-50 border-b border-gray-100">
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500" style={{ minWidth: 60 }}>Week</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500" style={{ minWidth: 200 }}>Blog Title</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Keyword</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Blog Status</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Blog Link</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Topic Approval</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Blog Approval</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Your Feedback</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {safeArray(content).map(item => (
-                    <tr key={item?.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 text-sm text-gray-600">{item?.week || '—'}</td>
-                      <td className="px-4 py-3">
-                        <p className="font-medium text-gray-800 text-sm">{item?.blog_title}</p>
-                        {item?.blog_type && <p className="text-xs text-gray-400 mt-0.5 line-clamp-1">{item?.blog_type}</p>}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-600">{item?.primary_keyword || '—'}</td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${blogStatusColors[item?.blog_status] || 'bg-gray-100 text-gray-600 border-gray-200'}`}>
-                          {item?.blog_status || 'Draft'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        {item?.client_link_visible_blog && item?.blog_link ? (
-                          <a href={normalizeUrl(item.blog_link)} target="_blank" rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white text-xs font-bold transition-all shadow-sm whitespace-nowrap">
-                            <Link2 className="w-3.5 h-3.5" /> View Draft
-                          </a>
-                        ) : (
-                          <div className="inline-flex items-center gap-1.5 text-gray-300 text-[10px] font-bold uppercase tracking-widest whitespace-nowrap">
-                            <Lock className="w-3 h-3" /> Not Ready
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <TopicApprovalButton
-                          contentId={item?.id}
-                          current={item?.topic_approval_status}
-                          slug={slug}
-                          portalPassword={portalPassword}
-                          onUpdate={handleContentApprovalUpdate}
-                        />
-                      </td>
-                      <td className="px-4 py-3">
-                        <BlogApprovalButton
-                          contentId={item?.id}
-                          current={item?.blog_approval_status}
-                          slug={slug}
-                          portalPassword={portalPassword}
-                          disabled={!item?.client_link_visible_blog}
-                          onUpdate={handleContentApprovalUpdate}
-                        />
-                      </td>
-                      <td className="px-4 py-3 text-xs text-gray-500 truncate max-w-[160px]" title={item?.blog_approval_status === 'Changes Required' ? item?.blog_client_feedback_note : ''}>
-                        {item?.blog_approval_status === 'Changes Required' ? (
-                          <span className="text-red-600 text-[10px] bg-red-50 px-1 py-0.5 rounded border border-red-100 line-clamp-2">{item?.blog_client_feedback_note || 'Changes requested'}</span>
-                        ) : '—'}
-                      </td>
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-100">
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500" style={{ minWidth: 60 }}>Week</th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500" style={{ minWidth: 200 }}>Blog Title</th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Keyword</th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Blog Status</th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Blog Doc</th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Topic Approval</th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Blog Approval</th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Your Feedback</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {safeArray(content).map(item => (
+                      <tr key={item?.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 text-sm text-gray-600">{item?.week || '—'}</td>
+                        <td className="px-4 py-3">
+                          <p className="font-medium text-gray-800 text-sm">{item?.blog_title}</p>
+                          {item?.blog_type && <p className="text-xs text-gray-400 mt-0.5 line-clamp-1">{item?.blog_type}</p>}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-600">{item?.primary_keyword || '—'}</td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${blogStatusColors[item?.blog_status] || 'bg-gray-100 text-gray-600 border-gray-200'}`}>
+                            {item?.blog_status || 'Draft'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          {item?.client_link_visible_blog && (item?.blog_doc_link || item?.blog_link) ? (
+                            <a href={normalizeUrl(item.blog_doc_link || item.blog_link)} target="_blank" rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white text-xs font-bold transition-all shadow-sm whitespace-nowrap">
+                              <Link2 className="w-3.5 h-3.5" /> View Draft
+                            </a>
+                          ) : (
+                            <div className="inline-flex items-center gap-1.5 text-gray-300 text-[10px] font-bold uppercase tracking-widest whitespace-nowrap">
+                              <Lock className="w-3 h-3" /> Not Ready
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <TopicApprovalButton
+                            contentId={item?.id}
+                            current={item?.topic_approval_status}
+                            slug={slug}
+                            portalPassword={portalPassword}
+                            onUpdate={handleContentApprovalUpdate}
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <BlogApprovalButton
+                            contentId={item?.id}
+                            current={item?.blog_approval_status}
+                            slug={slug}
+                            portalPassword={portalPassword}
+                            disabled={!item?.client_link_visible_blog}
+                            onUpdate={handleContentApprovalUpdate}
+                          />
+                        </td>
+                        <td className="px-4 py-3 text-xs text-gray-500 truncate max-w-[160px]" title={item?.blog_approval_status === 'Changes Required' ? item?.blog_client_feedback_note : ''}>
+                          {item?.blog_approval_status === 'Changes Required' ? (
+                            <span className="text-red-600 text-[10px] bg-red-50 px-1 py-0.5 rounded border border-red-100 line-clamp-2">{item?.blog_client_feedback_note || 'Changes requested'}</span>
+                          ) : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
 
-          {/* Legend for content approvals */}
-          {content.length > 0 && (
-            <div className="flex items-center gap-6 mt-4 px-1">
-              <p className="text-xs text-gray-500">Your approval options:</p>
-              <div className="flex items-center gap-4">
-                <span className="flex items-center gap-1 text-xs text-gray-500">
-                  <span className="w-2 h-2 rounded-full bg-green-500" />Approved
-                </span>
-                <span className="flex items-center gap-1 text-xs text-gray-500">
-                  <span className="w-2 h-2 rounded-full bg-red-500" />Rejected / Changes Required
-                </span>
-                <span className="flex items-center gap-1 text-xs text-gray-500">
-                  <span className="w-2 h-2 rounded-full bg-gray-300" />Pending
-                </span>
+            {/* Legend for content approvals */}
+            {content.length > 0 && (
+              <div className="flex items-center gap-6 mt-4 px-1">
+                <p className="text-xs text-gray-500">Your approval options:</p>
+                <div className="flex items-center gap-4">
+                  <span className="flex items-center gap-1 text-xs text-gray-500">
+                    <span className="w-2 h-2 rounded-full bg-green-500" />Approved
+                  </span>
+                  <span className="flex items-center gap-1 text-xs text-gray-500">
+                    <span className="w-2 h-2 rounded-full bg-red-500" />Rejected / Changes Required
+                  </span>
+                  <span className="flex items-center gap-1 text-xs text-gray-500">
+                    <span className="w-2 h-2 rounded-full bg-gray-300" />Pending
+                  </span>
+                </div>
               </div>
-            </div>
-          )}
-        </TabsContent>
+            )}
+          </TabsContent>
 
-        {/* ── Resources Tab ────────────────────────────────────────────── */}
-        <TabsContent value="resources">
-          {resources.length === 0 ? (
-            <div className="text-center py-16">
-              <Library className="w-10 h-10 text-gray-200 mx-auto mb-3" />
-              <p className="text-gray-400">No resources shared yet.</p>
+          {/* ── Resources Tab ────────────────────────────────────────────── */}
+          <TabsContent value="resources">
+            <div className="flex justify-end mb-4">
+              <Button size="sm" className="gap-1.5" onClick={() => setShowAddResource(true)}>
+                <span className="text-base leading-none">+</span> Add Resource
+              </Button>
             </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {safeArray(resources).map(res => (
-                <Card key={res?.id} className="border border-gray-200 hover:shadow-md transition-all">
-                  <CardContent className="p-5">
-                    <div className="flex items-start gap-4">
-                      <div className="w-12 h-12 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600 flex-shrink-0">
-                        {res?.type === 'image' ? <Image className="w-6 h-6" /> :
-                          res?.type === 'folder' ? <Folder className="w-6 h-6" /> :
-                            <Link2 className="w-6 h-6" />}
+            {resources.length === 0 ? (
+              <div className="text-center py-16">
+                <Library className="w-10 h-10 text-gray-200 mx-auto mb-3" />
+                <p className="text-gray-400">No resources shared yet.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {safeArray(resources).map(res => (
+                  <Card key={res?.id} className="border border-gray-200 hover:shadow-md transition-all">
+                    <CardContent className="p-5">
+                      <div className="flex items-start gap-4">
+                        <div className="w-12 h-12 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600 flex-shrink-0">
+                          {res?.type === 'image' ? <Image className="w-6 h-6" /> :
+                            res?.type === 'folder' ? <Folder className="w-6 h-6" /> :
+                              <Link2 className="w-6 h-6" />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <span className="text-[10px] uppercase tracking-widest font-bold text-gray-400 block mb-1">{res?.category || 'Asset'}</span>
+                          <h3 className="font-bold text-gray-900 truncate">{res?.name}</h3>
+                          <p className="text-xs text-gray-400 truncate mt-0.5">
+                            {safeURL(res?.url)?.hostname || 'resource'}
+                          </p>
+                          <a href={normalizeUrl(res?.url)} target="_blank" rel="noopener noreferrer"
+                            className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors w-full justify-center shadow-sm">
+                            View Resource <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        </div>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <span className="text-[10px] uppercase tracking-widest font-bold text-gray-400 block mb-1">{res?.category || 'Asset'}</span>
-                        <h3 className="font-bold text-gray-900 truncate">{res?.name}</h3>
-                        <p className="text-xs text-gray-400 truncate mt-0.5">
-                          {safeURL(res?.url)?.hostname || 'resource'}
-                        </p>
-                        <a href={normalizeUrl(res?.url)} target="_blank" rel="noopener noreferrer"
-                          className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors w-full justify-center shadow-sm">
-                          View Resource <ExternalLink className="w-3.5 h-3.5" />
-                        </a>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
-        </TabsContent>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </TabsContent>
 
-        {/* ── Reports Tab ─────────────────────────────────────────────── */}
-        <TabsContent value="reports">
-          {reports.length === 0 ? (
-            <div className="text-center py-16">
-              <BarChart3 className="w-10 h-10 text-gray-200 mx-auto mb-3" />
-              <p className="text-gray-400">No reports yet.</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {reports.map(report => (
-                <Card key={report.id} className="border border-gray-200 hover:shadow-md transition-all">
-                  <CardContent className="p-5">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium mb-3 ${typeColors[report.report_type] || 'bg-gray-50 text-gray-600'}`}>
-                      {report.report_type}
-                    </span>
-                    <h3 className="font-semibold text-gray-900">{report.title}</h3>
-                    <p className="text-sm text-gray-400 mt-0.5">{report.report_date}</p>
-                    {report.notes && <p className="text-sm text-gray-500 mt-2">{report.notes}</p>}
-                    <a href={normalizeUrl(report.report_url)} target="_blank" rel="noopener noreferrer"
-                      className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
-                      View Report <ExternalLink className="w-3.5 h-3.5" />
-                    </a>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
-        </TabsContent>
-      </Tabs>
+          {/* ── Reports Tab ─────────────────────────────────────────────── */}
+          <TabsContent value="reports">
+            {reports.length === 0 ? (
+              <div className="text-center py-16">
+                <BarChart3 className="w-10 h-10 text-gray-200 mx-auto mb-3" />
+                <p className="text-gray-400">No reports yet.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {reports.map(report => (
+                  <Card key={report.id} className="border border-gray-200 hover:shadow-md transition-all">
+                    <CardContent className="p-5">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium mb-3 ${typeColors[report.report_type] || 'bg-gray-50 text-gray-600'}`}>
+                        {report.report_type}
+                      </span>
+                      <h3 className="font-semibold text-gray-900">{report.title}</h3>
+                      <p className="text-sm text-gray-400 mt-0.5">{report.report_date}</p>
+                      {report.notes && <p className="text-sm text-gray-500 mt-2">{report.notes}</p>}
+                      <a href={normalizeUrl(report.report_url)} target="_blank" rel="noopener noreferrer"
+                        className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
+                        View Report <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
 
-      <div className="mt-8 text-center text-xs text-gray-300">Powered by CubeHQ</div>
-    </div>
+        <div className="mt-8 text-center text-xs text-gray-300">Powered by CubeHQ</div>
+      </div>
+
+      {/* ── Add Resource Modal ────────────────────────────────────────────── */}
+      {showAddResource && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={e => { if (e.target === e.currentTarget) setShowAddResource(false) }}>
+          <Card className="w-full max-w-sm shadow-2xl">
+            <CardContent className="p-6">
+              <h3 className="text-sm font-bold text-gray-900 mb-1">Add Resource</h3>
+              <p className="text-xs text-gray-400 mb-4">Share a link with your agency team.</p>
+              <form onSubmit={addResourceFromPortal} className="space-y-3">
+                <div>
+                  <label className="text-xs font-medium text-gray-700 block mb-1">Name</label>
+                  <Input
+                    autoFocus
+                    placeholder="e.g. Brand Guidelines"
+                    value={resourceForm.name}
+                    onChange={e => setResourceForm(f => ({ ...f, name: e.target.value }))}
+                    className="h-8 text-sm"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-700 block mb-1">URL</label>
+                  <Input
+                    placeholder="https://drive.google.com/..."
+                    value={resourceForm.url}
+                    onChange={e => setResourceForm(f => ({ ...f, url: e.target.value }))}
+                    className="h-8 text-sm"
+                    required
+                  />
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <Button type="button" variant="ghost" size="sm" className="flex-1 text-xs" onClick={() => setShowAddResource(false)}>Cancel</Button>
+                  <Button type="submit" size="sm" className="flex-1 text-xs" disabled={addingResource || !resourceForm.name.trim() || !resourceForm.url.trim()}>
+                    {addingResource ? 'Adding...' : 'Add Resource'}
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div >
   )
 }

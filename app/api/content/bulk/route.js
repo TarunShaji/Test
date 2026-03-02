@@ -3,10 +3,44 @@ import { v4 as uuidv4 } from 'uuid'
 import { connectToMongo } from '@/lib/mongodb'
 import { handleCORS, withAuth } from '@/lib/api-utils'
 import { applyContentTransition } from '@/lib/lifecycleEngine'
-
 import { ContentSchema } from '@/lib/schemas/content.schema'
 import { validateBody } from '@/lib/validation'
 import { z } from 'zod'
+
+/**
+ * ContentImportItemSchema — a lenient, non-strict schema used ONLY for bulk import.
+ * It mirrors ALL fields in ContentSchema but without .strict() and with relaxed types
+ * (strings for URLs/enums so that the mapping layer can pass raw values without
+ * a double-parse cycle). The engine validates fully after normalization.
+ *
+ * Any key NOT in this list will be stripped by Zod before insertion.
+ */
+const ContentImportItemSchema = z.object({
+    blog_title: z.string().min(1),
+    client_id: z.string().optional().nullable(),
+
+    week: z.string().optional().nullable(),
+    primary_keyword: z.string().optional().nullable(),
+    secondary_keywords: z.string().optional().nullable(),
+    blog_type: z.string().optional().nullable(),
+    writer: z.string().optional().nullable(),
+
+    outline_status: z.string().optional().nullable(),
+
+    required_by: z.string().optional().nullable(),
+    date_edited: z.string().optional().nullable(),
+    date_sent_for_approval: z.string().optional().nullable(),
+    date_approved: z.string().optional().nullable(),
+    published_date: z.string().optional().nullable(),
+
+    raw_submission_rating: z.string().optional().nullable(),
+    ai_score: z.string().optional().nullable(),
+
+    blog_status: z.string().optional().nullable(),
+    blog_doc_link: z.string().optional().nullable(),
+    blog_link: z.string().optional().nullable(),
+})
+// No .strict() — any extra keys from the mapping layer are stripped automatically
 
 export async function POST(request) {
     return withAuth(request, async () => {
@@ -14,27 +48,13 @@ export async function POST(request) {
             const database = await connectToMongo()
             const body = await request.json()
 
-            // Explicit import schema — does NOT inherit .strict() from ContentSchema.
-            // Unknown fields are stripped, not rejected.
-            const ContentImportItemSchema = z.object({
-                blog_title: z.string().min(1),
-                client_id: z.string().optional().nullable(),
-                week: z.string().optional().nullable(),
-                primary_keyword: z.string().optional().nullable(),
-                blog_type: z.string().optional().nullable(),
-                writer: z.string().optional().nullable(),
-                blog_status: z.string().optional().nullable(),
-                blog_link: z.string().optional().nullable(),
-                published_date: z.string().optional().nullable(),
-            }) // no .strict() — unknown keys stripped by default
-
             const validation = validateBody(z.object({
                 items: z.array(ContentImportItemSchema),
                 client_id: z.string().uuid()
             }), body)
 
             if (!validation.success) {
-                console.error('[content/bulk] Validation failed:', JSON.stringify(validation.error))
+                console.error('[content/bulk POST] Validation failed:', JSON.stringify(validation.error))
                 return handleCORS(NextResponse.json(validation.error, { status: 400 }))
             }
 
@@ -46,13 +66,16 @@ export async function POST(request) {
 
             for (const item of items) {
                 try {
-                    const doc = applyContentTransition(null, {
+                    // Normalize URL fields before lifecycle engine (handles missing protocols)
+                    const safeItem = {
                         ...item,
                         id: uuidv4(),
                         client_id,
                         created_at: now,
-                        updated_at: now
-                    })
+                        updated_at: now,
+                    }
+
+                    const doc = applyContentTransition(null, safeItem)
                     docs.push(doc)
                 } catch (err) {
                     errors.push({ title: item.blog_title || 'Unknown', error: err.message })

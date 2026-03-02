@@ -36,10 +36,10 @@ import {
   topicApprovalColors, blogStatusColors, approvalColors, CONTENT_COLUMN_WIDTHS
 } from '@/lib/constants'
 
-const COL_ORDER_KEY = 'content_column_order_v2'
+const COL_ORDER_KEY = 'content_column_order_v3'
 const DEFAULT_COL_ORDER = [
   'client', 'week', 'title', 'keyword', 'writer',
-  'topic_approval', 'blog_status',
+  'topic_approval', 'blog_status', 'blog_doc',
   'blog_internal_approval', 'send_link', 'blog_approval', 'blog_feedback',
   'link', 'published', 'actions'
 ]
@@ -58,10 +58,22 @@ export default function ContentCalendarPage() {
   const [confirmConfig, setConfirmConfig] = useState(null)
 
   useEffect(() => {
+    // Nuke the old v2 key so stale orders are gone
+    localStorage.removeItem('content_column_order_v2')
+
     const saved = localStorage.getItem(COL_ORDER_KEY)
     const parsed = safeJSON(saved)
-    if (parsed) setColumnOrder(parsed)
-    else setColumnOrder(DEFAULT_COL_ORDER)
+    if (parsed && Array.isArray(parsed)) {
+      let cols = [...parsed]
+      // Ensure blog_doc is present in any v3 save
+      if (!cols.includes('blog_doc')) {
+        const idx = cols.indexOf('blog_internal_approval')
+        cols = idx >= 0 ? [...cols.slice(0, idx), 'blog_doc', ...cols.slice(idx)] : [...cols, 'blog_doc']
+      }
+      setColumnOrder(cols)
+    } else {
+      setColumnOrder(DEFAULT_COL_ORDER)
+    }
   }, [])
 
   const updateContent = async (contentId, field, value) => {
@@ -225,7 +237,7 @@ export default function ContentCalendarPage() {
                 value={item.blog_internal_approval || 'Pending'}
                 type="internal_approval"
                 options={CONTENT_INTERNAL_APPROVALS}
-                disabled={item.blog_status !== 'Sent for Approval' && item.blog_status !== 'Published' && item.blog_status !== 'In Progress'}
+                disabled={!item.blog_doc_link}
                 onSave={v => updateContent(item.id, 'blog_internal_approval', v)}
               />
             )}
@@ -236,7 +248,7 @@ export default function ContentCalendarPage() {
                 className={`h-7 px-2 text-[10px] uppercase tracking-wider font-bold ${item.client_link_visible_blog ? 'text-green-600' : ''}`}
                 disabled={
                   item.blog_internal_approval !== 'Approved' ||
-                  !item.blog_link ||
+                  !item.blog_doc_link ||
                   item.client_link_visible_blog === true
                 }
                 onClick={() => publishContent(item.id)}
@@ -256,6 +268,7 @@ export default function ContentCalendarPage() {
                 ) : <span className="text-gray-300 text-xs">—</span>}
               </div>
             )}
+            {colId === 'blog_doc' && <LinkCell value={item.blog_doc_link} onSave={v => updateContent(item.id, 'blog_doc_link', v)} />}
             {colId === 'link' && <LinkCell value={item.blog_link} onSave={v => updateContent(item.id, 'blog_link', v)} />}
             {colId === 'published' && <EditableCell value={item.published_date} type="date" onSave={v => updateContent(item.id, 'published_date', v)} />}
             {colId === 'actions' && (
@@ -272,7 +285,7 @@ export default function ContentCalendarPage() {
   const columnLabels = {
     client: 'Client', week: 'Week', title: 'Blog Title', keyword: 'Keyword', writer: 'Writer',
     topic_approval: 'Topic Approval', blog_status: 'Blog Status',
-    blog_internal_approval: 'Internal Approval', send_link: 'Send Link',
+    blog_doc: 'Blog Doc', blog_internal_approval: 'Internal Approval', send_link: 'Send Link',
     blog_approval: 'Client Approval', blog_feedback: 'Feedback',
     link: 'Blog Link', published: 'Published', actions: ''
   }
