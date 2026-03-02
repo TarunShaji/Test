@@ -75,6 +75,29 @@ export async function POST(request) {
     })
 }
 
+export async function DELETE(request) {
+    return withAuth(request, async () => {
+        try {
+            const database = await connectToMongo()
+            const body = await request.json()
+            const { ids } = body
+
+            if (!ids || !Array.isArray(ids) || ids.length === 0) {
+                return handleCORS(NextResponse.json({ error: 'IDs array is required' }, { status: 400 }))
+            }
+
+            const result = await database.collection('content_items').deleteMany({ id: { $in: ids } })
+
+            return handleCORS(NextResponse.json({
+                message: `Successfully deleted ${result.deletedCount} items`,
+                count: result.deletedCount
+            }))
+        } catch (error) {
+            return handleCORS(NextResponse.json({ error: 'Internal server error', details: error.message }, { status: 500 }))
+        }
+    })
+}
+
 export async function OPTIONS() {
     return handleCORS(new NextResponse(null, { status: 200 }))
 }

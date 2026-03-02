@@ -129,6 +129,27 @@ export async function POST(request) {
     })
 }
 
+export async function DELETE(request) {
+    return withAuth(request, async () => {
+        return withErrorLogging(request, async () => {
+            const database = await connectToMongo()
+            const body = await request.json()
+            const { ids } = body
+
+            if (!ids || !Array.isArray(ids) || ids.length === 0) {
+                return handleCORS(NextResponse.json({ error: 'IDs array is required' }, { status: 400 }))
+            }
+
+            const result = await database.collection('tasks').deleteMany({ id: { $in: ids } })
+
+            return handleCORS(NextResponse.json({
+                message: `Successfully deleted ${result.deletedCount} tasks`,
+                count: result.deletedCount
+            }))
+        })
+    })
+}
+
 export async function OPTIONS() {
     return handleCORS(new NextResponse(null, { status: 200 }))
 }

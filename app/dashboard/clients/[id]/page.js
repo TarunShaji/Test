@@ -68,22 +68,26 @@ export default function ClientDetailPage() {
   const [taskColOrder, setTaskColOrder] = useState([])
   const [contentColOrder, setContentColOrder] = useState([])
   const [confirmConfig, setConfirmConfig] = useState(null)
+  const [selectedTasks, setSelectedTasks] = useState(new Set())
+  const [selectedContent, setSelectedContent] = useState(new Set())
+  const [bulkDeleting, setBulkDeleting] = useState(false)
+  const [bulkDeletingContent, setBulkDeletingContent] = useState(false)
 
   useEffect(() => {
     const savedTasks = localStorage.getItem('client_tasks_col_order_v2')
     const parsedTasks = safeJSON(savedTasks)
     if (parsedTasks && Array.isArray(parsedTasks)) {
-      setTaskColOrder(parsedTasks.filter(c => c !== 'selection' && c !== 'client'))
+      setTaskColOrder(parsedTasks.filter(c => c !== 'client').includes('selection') ? parsedTasks.filter(c => c !== 'client') : ['selection', ...parsedTasks.filter(c => c !== 'selection' && c !== 'client')])
     } else {
-      setTaskColOrder(['title', 'category', 'status', 'priority', 'eta', 'assigned', 'link', 'internal_approval', 'send_link', 'client_approval', 'client_feedback', 'actions'])
+      setTaskColOrder(['selection', 'title', 'category', 'status', 'priority', 'eta', 'assigned', 'link', 'internal_approval', 'send_link', 'client_approval', 'client_feedback', 'actions'])
     }
 
     const savedContent = localStorage.getItem('client_content_col_order_v2')
     const parsedContent = safeJSON(savedContent)
     if (parsedContent && Array.isArray(parsedContent)) {
-      setContentColOrder(parsedContent.filter(c => c !== 'client_grip' && c !== 'client'))
+      setContentColOrder(parsedContent.filter(c => c !== 'client').includes('selection') ? parsedContent.filter(c => c !== 'client') : ['selection', ...parsedContent.filter(c => c !== 'selection' && c !== 'client')])
     } else {
-      setContentColOrder(['week', 'title', 'keyword', 'writer', 'outline', 'topic_approval', 'blog_status', 'blog_internal_approval', 'send_link', 'blog_approval', 'blog_feedback', 'link', 'published', 'comments', 'actions'])
+      setContentColOrder(['selection', 'week', 'title', 'keyword', 'writer', 'outline', 'topic_approval', 'blog_status', 'blog_internal_approval', 'send_link', 'blog_approval', 'blog_feedback', 'link', 'published', 'comments', 'actions'])
     }
   }, [])
   const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || ''
@@ -191,9 +195,59 @@ export default function ClientDetailPage() {
       description: 'This will permanently delete the task. This cannot be undone.',
       onConfirm: async () => {
         await apiFetch(`/api/tasks/${taskId}`, { method: 'DELETE' })
+        setSelectedTasks(prev => {
+          const next = new Set(prev)
+          next.delete(taskId)
+          return next
+        })
         mutateTasks()
       }
     })
+  }
+
+  const deleteSelectedTasks = () => {
+    if (selectedTasks.size === 0) return
+    setConfirmConfig({
+      title: `Delete ${selectedTasks.size} Tasks`,
+      description: `This will permanently delete ${selectedTasks.size} selected tasks. This cannot be undone.`,
+      onConfirm: async () => {
+        setBulkDeleting(true)
+        try {
+          const res = await apiFetch('/api/tasks/bulk', {
+            method: 'DELETE',
+            body: JSON.stringify({ ids: Array.from(selectedTasks) })
+          })
+          if (res.ok) {
+            setSelectedTasks(new Set())
+            mutateTasks()
+          } else {
+            const err = await res.json()
+            alert(err.error || 'Bulk delete failed')
+          }
+        } catch (e) {
+          console.error('Bulk delete failed', e)
+        } finally {
+          setBulkDeleting(false)
+        }
+      }
+    })
+  }
+
+  const toggleTaskSelection = (taskId) => {
+    setSelectedTasks(prev => {
+      const next = new Set(prev)
+      if (next.has(taskId)) next.delete(taskId)
+      else next.add(taskId)
+      return next
+    })
+  }
+
+  const toggleAllTasks = () => {
+    if (selectedTasks.size === allTasks.length) {
+      setSelectedTasks(new Set())
+    } else {
+      setSelectedTasks(new Set(allTasks.map(t => t.id)))
+    }
   }
 
   const addReport = async (e) => {
@@ -313,9 +367,59 @@ export default function ClientDetailPage() {
       description: 'This will permanently delete this blog post entry. This cannot be undone.',
       onConfirm: async () => {
         await apiFetch(`/api/content/${contentId}`, { method: 'DELETE' })
+        setSelectedContent(prev => {
+          const next = new Set(prev)
+          next.delete(contentId)
+          return next
+        })
         mutateContent()
       }
     })
+  }
+
+  const deleteSelectedContent = () => {
+    if (selectedContent.size === 0) return
+    setConfirmConfig({
+      title: `Delete ${selectedContent.size} Content Items`,
+      description: `This will permanently delete ${selectedContent.size} selected items. This cannot be undone.`,
+      onConfirm: async () => {
+        setBulkDeletingContent(true)
+        try {
+          const res = await apiFetch('/api/content/bulk', {
+            method: 'DELETE',
+            body: JSON.stringify({ ids: Array.from(selectedContent) })
+          })
+          if (res.ok) {
+            setSelectedContent(new Set())
+            mutateContent()
+          } else {
+            const err = await res.json()
+            alert(err.error || 'Bulk delete failed')
+          }
+        } catch (e) {
+          console.error('Bulk delete failed', e)
+        } finally {
+          setBulkDeletingContent(false)
+        }
+      }
+    })
+  }
+
+  const toggleContentSelection = (contentId) => {
+    setSelectedContent(prev => {
+      const next = new Set(prev)
+      if (next.has(contentId)) next.delete(contentId)
+      else next.add(contentId)
+      return next
+    })
+  }
+
+  const toggleAllContent = () => {
+    if (selectedContent.size === allContent.length) {
+      setSelectedContent(new Set())
+    } else {
+      setSelectedContent(new Set(allContent.map(c => c.id)))
+    }
   }
 
   const allTasks = useMemo(() => safeArray(tasks), [tasks])
@@ -393,12 +497,27 @@ export default function ClientDetailPage() {
       width: widths[id] || 'auto',
       minWidth: widths[id] || 'auto'
     }
+
+    const isTask = type === 'task'
+    const items = isTask ? allTasks : allContent
+    const selected = isTask ? selectedTasks : selectedContent
+    const toggleAll = isTask ? toggleAllTasks : toggleAllContent
+
     return (
       <th ref={setNodeRef} style={style} className={`text-left px-3 py-2.5 font-semibold text-gray-600 bg-gray-50 border-r border-gray-100 last:border-0 ${isDragging ? 'opacity-50' : ''}`}>
         <div className="flex items-center gap-2 overflow-hidden">
-          <div {...attributes} {...listeners} className="cursor-grab hover:text-blue-500 flex-shrink-0">
-            <GripHorizontal className="w-3 h-3" />
-          </div>
+          {id === 'selection' ? (
+            <input
+              type="checkbox"
+              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
+              checked={items.length > 0 && selected.size === items.length}
+              onChange={toggleAll}
+            />
+          ) : (
+            <div {...attributes} {...listeners} className="cursor-grab hover:text-blue-500 flex-shrink-0">
+              <GripHorizontal className="w-3 h-3" />
+            </div>
+          )}
           <span className="truncate" title={label}>{label}</span>
         </div>
       </th>
@@ -413,6 +532,16 @@ export default function ClientDetailPage() {
       <tr ref={setNodeRef} style={style} className={`hover:bg-gray-50 group border-b border-gray-100 ${isDragging ? 'opacity-50 shadow-lg' : ''}`}>
         {safeArray(taskColOrder).map(colId => (
           <td key={colId} className={`px-3 py-1.5 overflow-hidden ${colId === 'internal_approval' || colId === 'send_link' ? 'bg-gray-50/50' : ''}`} style={{ width: TASK_COLUMN_WIDTHS[colId], minWidth: TASK_COLUMN_WIDTHS[colId] }}>
+            {colId === 'selection' && (
+              <div className="flex items-center justify-center">
+                <input
+                  type="checkbox"
+                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
+                  checked={selectedTasks.has(task.id)}
+                  onChange={() => toggleTaskSelection(task.id)}
+                />
+              </div>
+            )}
             {colId === 'title' && (
               <div className="flex items-center gap-2">
                 <div {...attributes} {...listeners} className="cursor-grab text-gray-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
@@ -492,6 +621,16 @@ export default function ClientDetailPage() {
       <tr ref={setNodeRef} style={style} className={`hover:bg-gray-50 group border-b border-gray-100 ${isDragging ? 'opacity-50 shadow-lg' : ''}`}>
         {safeArray(contentColOrder).map(colId => (
           <td key={colId} className="px-3 py-1.5 overflow-hidden" style={{ width: CONTENT_COLUMN_WIDTHS[colId], minWidth: CONTENT_COLUMN_WIDTHS[colId] }}>
+            {colId === 'selection' && (
+              <div className="flex items-center justify-center">
+                <input
+                  type="checkbox"
+                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
+                  checked={selectedContent.has(item.id)}
+                  onChange={() => toggleContentSelection(item.id)}
+                />
+              </div>
+            )}
             {colId === 'week' && (
               <div className="flex items-center gap-2">
                 <div {...attributes} {...listeners} className="cursor-grab text-gray-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
@@ -577,12 +716,14 @@ export default function ClientDetailPage() {
   }
 
   const taskColLabels = {
+    selection: '',
     title: 'Task', category: 'Category', status: 'Status', priority: 'Priority',
     eta: 'ETA End', assigned: 'Assigned', link: 'Link', internal_approval: 'Internal Approval',
     send_link: 'Send Link', client_approval: 'Client Approval', client_feedback: 'Feedback', actions: ''
   }
 
   const contentColLabels = {
+    selection: '',
     week: 'Week', title: 'Blog Title', keyword: 'Keyword', writer: 'Writer',
     outline: 'Outline Status', topic_approval: 'Topic Approval', blog_status: 'Blog Status',
     blog_internal_approval: 'Internal Approval', send_link: 'Send Link',
@@ -658,6 +799,26 @@ export default function ClientDetailPage() {
 
         {/* ── Timeline Tab ───────────────────────────────────────────────── */}
         <TabsContent value="timeline">
+          <div className="flex items-center justify-between mb-4 h-9">
+            <div className="flex items-center gap-3">
+              {selectedTasks.size > 0 && (
+                <div className="flex items-center gap-2 bg-red-50 px-3 py-1.5 rounded-lg border border-red-100">
+                  <span className="text-xs font-medium text-red-700">{selectedTasks.size} selected</span>
+                  <div className="w-px h-3 bg-red-200" />
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-2 text-red-600 hover:text-red-700 hover:bg-red-100 text-xs gap-1.5 font-bold"
+                    onClick={deleteSelectedTasks}
+                    disabled={bulkDeleting}
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    Delete Selected
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
           <div className="bg-white border border-gray-200 rounded-lg overflow-auto shadow-sm">
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleTaskColDragEnd} modifiers={[restrictToHorizontalAxis]}>
               <table className="w-full text-sm" style={{ minWidth: '1800px', tableLayout: 'fixed' }}>
@@ -711,6 +872,26 @@ export default function ClientDetailPage() {
 
         {/* ── Content Calendar Tab ─────────────────────────────────────────── */}
         <TabsContent value="content">
+          <div className="flex items-center justify-between mb-4 h-9">
+            <div className="flex items-center gap-3">
+              {selectedContent.size > 0 && (
+                <div className="flex items-center gap-2 bg-red-50 px-3 py-1.5 rounded-lg border border-red-100">
+                  <span className="text-xs font-medium text-red-700">{selectedContent.size} selected</span>
+                  <div className="w-px h-3 bg-red-200" />
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-2 text-red-600 hover:text-red-700 hover:bg-red-100 text-xs gap-1.5 font-bold"
+                    onClick={deleteSelectedContent}
+                    disabled={bulkDeletingContent}
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    Delete Selected
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
           <div className="bg-white border border-gray-200 rounded-lg overflow-auto shadow-sm">
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleContentColDragEnd} modifiers={[restrictToHorizontalAxis]}>
               <table className="w-full text-sm" style={{ minWidth: '2000px', tableLayout: 'fixed' }}>

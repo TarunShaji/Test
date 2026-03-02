@@ -155,7 +155,14 @@ function rowToTask(row, headers, clientId) {
   if (pRaw && ['P0', 'P1', 'P2', 'P3'].includes(pRaw.toUpperCase())) task.priority = pRaw.toUpperCase()
 
   const linkField = h(['link', 'url', 'live link', 'page url'])
-  if (linkField && str(row[linkField])) task.link_url = str(row[linkField])
+  if (linkField) {
+    const rawLink = str(row[linkField])
+    if (rawLink) {
+      // Handles plain URLs or "Anchor Text (https://...)" format from paste interceptor
+      const urlMatch = rawLink.match(/https?:\/\/[^\s'"<>)]+/)
+      if (urlMatch) task.link_url = urlMatch[0]
+    }
+  }
 
   const assignedField = h(['assigned to', 'assigned', 'owner', 'assignee', 'team member'])
   if (assignedField && str(row[assignedField])) task.assigned_to = str(row[assignedField])
@@ -238,7 +245,8 @@ function rowToContent(row, headers, clientId) {
   if (linkField) {
     const rawLink = str(row[linkField])
     if (rawLink) {
-      const urlMatch = rawLink.match(/https?:\/\/[^\s'"<>]+/)
+      // Handles plain URLs or "Anchor Text (https://...)" format from paste interceptor
+      const urlMatch = rawLink.match(/https?:\/\/[^\s'"<>)]+/)
       if (urlMatch) item.blog_link = urlMatch[0]
     }
   }
@@ -372,10 +380,49 @@ function ImportShell({
               <textarea
                 value={rawData}
                 onChange={e => setRawData(e.target.value)}
+                onPaste={e => {
+                  const html = e.clipboardData.getData('text/html')
+                  if (!html || !html.includes('<a ')) return
+
+                  e.preventDefault()
+                  try {
+                    const parser = new DOMParser()
+                    const doc = parser.parseFromString(html, 'text/html')
+                    const table = doc.querySelector('table')
+                    if (!table) {
+                      // Just plain HTML with links, manually fallback or use text
+                      const text = e.clipboardData.getData('text/plain')
+                      setRawData(text)
+                      return
+                    }
+
+                    const rows = Array.from(table.querySelectorAll('tr'))
+                    const tsv = rows.map(tr => {
+                      const cells = Array.from(tr.querySelectorAll('td, th'))
+                      return cells.map(td => {
+                        const link = td.querySelector('a')
+                        let text = td.innerText.trim()
+                        if (link && link.href && !text.includes(link.href)) {
+                          // Format as "Anchor Text (URL)" so our mapping functions can extract it
+                          return `${text} (${link.href})`
+                        }
+                        return text
+                      }).join('\t')
+                    }).join('\n')
+
+                    setRawData(tsv)
+                    // Trigger parse immediately. Pass tsv directly to avoid stale state from setRawData
+                    setTimeout(() => onParse(tsv), 10)
+                  } catch (err) {
+                    console.error('Paste intercept failed', err)
+                    const text = e.clipboardData.getData('text/plain')
+                    setRawData(text)
+                  }
+                }}
                 placeholder="Paste tab-separated data from Google Sheets here..."
                 className="w-full h-36 p-3 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-blue-400 font-mono resize-none"
               />
-              <Button size="sm" onClick={onParse} disabled={!rawData.trim()}>Parse</Button>
+              <Button size="sm" onClick={() => onParse(rawData)} disabled={!rawData.trim()}>Parse</Button>
             </div>
           )}
           {parsed && (
@@ -552,7 +599,7 @@ function TaskCSVImport({ clients }) {
       parsed={parsed}
       parseError={parseError}
       onFile={handleFile}
-      onParse={() => doParse(rawData)}
+      onParse={(text) => doParse(text || rawData)}
       onImport={handleImport}
       importing={importing}
       result={result}
@@ -623,7 +670,7 @@ function ContentCSVImport({ clients }) {
       parsed={parsed}
       parseError={parseError}
       onFile={handleFile}
-      onParse={() => doParse(rawData)}
+      onParse={(text) => doParse(text || rawData)}
       onImport={handleImport}
       importing={importing}
       result={result}
