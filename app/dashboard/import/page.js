@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Upload, CheckCircle, AlertCircle, Loader2, Key, FileText, ListTodo } from 'lucide-react'
 import { rowToContent, getMappedHeaders } from '@/lib/import/content-mapping'
-import { rowToTask, rowToClickUpTask } from '@/lib/import/task-mapping'
+import { rowToTask, rowToClickUpTask, TASK_PREVIEW_COLS } from '@/lib/import/task-mapping'
 
 
 function parseSpreadsheet(text) {
@@ -315,22 +315,23 @@ function FormatGuide({ actionLabel }) {
       <CardContent className="text-xs text-gray-500 space-y-3">
         <div>
           <p className="font-semibold text-gray-700 mb-1">Required</p>
-          <p className="text-gray-600">Task / Title / Name / To-do / Action Item</p>
+          <p className="text-gray-600">Task / Task Name / Task Title / Title / Name / To-do / Todo / Action Item / Action Items / Item / Description / Deliverable</p>
         </div>
         <div>
           <p className="font-semibold text-gray-700 mb-1">Optional (auto-detected)</p>
           <ul className="space-y-0.5">
-            <li><span className="font-medium">Status</span> → Work in Progress, Completed, Blocked…</li>
-            <li><span className="font-medium">Category / Type</span></li>
-            <li><span className="font-medium">Priority</span> → P0, P1, P2, P3</li>
-            <li><span className="font-medium">Assigned to / Owner</span></li>
-            <li><span className="font-medium">ETA / Due / Deadline / Required by</span></li>
-            <li><span className="font-medium">Remarks / Notes / Comments</span></li>
-            <li><span className="font-medium">Link / URL</span></li>
+            <li><span className="font-medium">Status</span> → Work in Progress, Completed, Pending Review, Blocked… (case-insensitive)</li>
+            <li><span className="font-medium">Category / Type / Group / Service / Industry</span> — saved as plain text</li>
+            <li><span className="font-medium">Priority</span> → P0/Urgent, P1/High, P2/Normal (default), P3/Low</li>
+            <li><span className="font-medium">ETA / Due / Deadline / Required by / Timeline</span></li>
+            <li><span className="font-medium">Link / URL / Live Link</span></li>
           </ul>
         </div>
+        <div className="bg-blue-50 border border-blue-100 rounded p-2 text-blue-700">
+          <strong>Assigned To</strong> is not mapped — select the assignee from the dashboard after import.
+        </div>
         <div className="bg-amber-50 border border-amber-100 rounded p-2 text-amber-700">
-          Unknown columns are silently ignored — only schema fields are saved.
+          Rows are skipped only when the Task/Title column cannot be found. Unknown columns are logged but not imported.
         </div>
       </CardContent>
     </Card>
@@ -342,23 +343,24 @@ function FormatGuide({ actionLabel }) {
       <CardContent className="text-xs text-gray-500 space-y-3">
         <div>
           <p className="font-semibold text-gray-700 mb-1">Required</p>
-          <p className="text-gray-600">Blog Title / Blog Topic / Topic / Title</p>
+          <p className="text-gray-600">Blog Title / Blog Topic / Title / Topic</p>
         </div>
         <div>
           <p className="font-semibold text-gray-700 mb-1">Optional (auto-detected)</p>
           <ul className="space-y-0.5">
-            <li><span className="font-medium">Week</span></li>
-            <li><span className="font-medium">Primary Keyword</span></li>
-            <li><span className="font-medium">Blog Type / Content Type / Content Goal</span></li>
-            <li><span className="font-medium">Intern Name / Intern / Writer / Author</span></li>
-            <li><span className="font-medium">Outline</span> → Pending, Submitted, Approved…</li>
-            <li><span className="font-medium">Blog Status / Status / Intern Status</span></li>
-            <li><span className="font-medium">Live Link / Blog Link / Publishing Link / URL</span></li>
-            <li><span className="font-medium">Published Date / Publishing Date / Date Published</span></li>
+            <li><span className="font-medium">Week / Wk</span> — kept as number 1–10</li>
+            <li><span className="font-medium">Keyword / Primary Keyword / Primary Keywords</span></li>
+            <li><span className="font-medium">Writer / Author</span></li>
+            <li><span className="font-medium">Blog Doc / Blog Document</span></li>
+            <li><span className="font-medium">Blog Link / Link / Live Link / Published Link / Publishing Link</span></li>
+            <li><span className="font-medium">Published / Published Date / Date of Publication</span> → normalised to YYYY-MM-DD</li>
           </ul>
         </div>
+        <div className="bg-blue-50 border border-blue-100 rounded p-2 text-blue-700">
+          Topic Approval, Blog Status, Internal Approval, Send Link, Client Approval, and Feedback are <strong>not imported</strong> — managed via the dashboard.
+        </div>
         <div className="bg-amber-50 border border-amber-100 rounded p-2 text-amber-700">
-          Columns like Search Volume, Meta Title, AI Score, Secondary Keywords, Client Comment, QC, etc. are recognised but <strong>not imported</strong> (not in schema). They appear in preview only.
+          Rows are skipped only when the Blog Title column cannot be found.
         </div>
       </CardContent>
     </Card>
@@ -495,6 +497,7 @@ function TaskCSVImport({ clients }) {
   const [selectedClient, setSelectedClient] = useState('__none__')
   const [rawData, setRawData] = useState('')
   const [parsed, setParsed] = useState(null)
+  const [mappedRows, setMappedRows] = useState([])
   const [parseError, setParseError] = useState('')
   const [importing, setImporting] = useState(false)
   const [result, setResult] = useState(null)
@@ -503,12 +506,27 @@ function TaskCSVImport({ clients }) {
     setParseError('')
     try {
       const p = parseSpreadsheet(text)
-      if (!p) { setParseError('Could not parse. Make sure there is a header row and at least one data row.'); setParsed(null); return }
-      const valid = p.rows.map(r => rowToTask(r, p.headers, 'dummy')).filter(Boolean)
-      p.validCount = valid.length
-      if (valid.length === 0) { p.unsupported = true; p.unsupportedMsg = 'No rows with a recognisable title column found. Rename your column to "Task", "Title", or "Name".' }
-      setParsed(p)
-    } catch (e) { setParseError('Parse error: ' + (e?.message || 'Unknown error')); setParsed(null) }
+      if (!p) { setParseError('Could not parse. Make sure there is a header row and at least one data row.'); setParsed(null); setMappedRows([]); return }
+
+      console.log('[task-import] 📋 Raw sheet columns:', p.headers)
+
+      const mapped = p.rows.map(r => rowToTask(r, p.headers, 'preview')).filter(Boolean)
+      console.log('[task-import] ✅ Mapped', mapped.length, 'of', p.rows.length, 'rows | Sample:', mapped[0])
+
+      if (mapped.length === 0) {
+        setParsed({ ...p, validCount: 0, unsupported: true, unsupportedMsg: 'No rows with a recognisable title column found. Rename your column to "Task", "Title", or "Name".' })
+        setMappedRows([])
+        return
+      }
+
+      setParsed({ ...p, validCount: mapped.length })
+      setMappedRows(mapped)
+    } catch (e) {
+      console.error('[task-import] Parse error:', e)
+      setParseError('Parse error: ' + (e?.message || 'Unknown error'))
+      setParsed(null)
+      setMappedRows([])
+    }
   }
 
   const handleFile = async (e) => {
@@ -531,11 +549,48 @@ function TaskCSVImport({ clients }) {
       let data = {}; try { data = await res.json() } catch (e) { /* ignore */ }
       if (res.ok) {
         setResult({ success: data.count ?? tasks.length, failed: data.failed ?? 0, total: tasks.length, errors: safeArray(data.errors) })
-        setParsed(null); setRawData('')
+        setParsed(null); setMappedRows([]); setRawData('')
       } else { setResult({ success: 0, failed: tasks.length, total: tasks.length, error: data.error || `Server error (${res.status})` }) }
     } catch (e) { setResult({ success: 0, failed: 0, total: 0, error: 'Network error: ' + (e?.message || 'Could not reach server') }) }
     finally { setImporting(false) }
   }
+
+  const mappedPreview = mappedRows.length > 0 && (
+    <Card className="border border-gray-200">
+      <CardHeader>
+        <CardTitle className="text-base">
+          Preview <span className="text-xs font-normal text-gray-400">(exactly what will be saved · {mappedRows.length} rows)</span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="p-0">
+        <div className="overflow-auto max-h-80">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="bg-gray-50 border-b">
+                {TASK_PREVIEW_COLS.map(c => (
+                  <th key={c.field} className="px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap">{c.label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {mappedRows.slice(0, 8).map((row, i) => (
+                <tr key={i} className="hover:bg-gray-50">
+                  {TASK_PREVIEW_COLS.map(c => (
+                    <td key={c.field} className="px-3 py-1.5 text-gray-700 max-w-[200px] truncate" title={String(row[c.field] || '')}>
+                      {String(row[c.field] ?? '') || <span className="text-gray-300 italic">—</span>}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="px-4 py-3 border-t border-gray-100 bg-gray-50 text-xs text-gray-500">
+          <span className="font-medium">{mappedRows.length}</span> rows ready to import
+        </div>
+      </CardContent>
+    </Card>
+  )
 
   return (
     <ImportShell
@@ -554,6 +609,7 @@ function TaskCSVImport({ clients }) {
       importing={importing}
       result={result}
       setResult={setResult}
+      customPreview={mappedPreview}
     />
   )
 }
@@ -567,8 +623,11 @@ function TaskCSVImport({ clients }) {
 const CONTENT_PREVIEW_COLS = [
   { field: 'week', label: 'Week' },
   { field: 'blog_title', label: 'Blog Title' },
+  { field: 'primary_keyword', label: 'Keyword' },
+  { field: 'writer', label: 'Writer' },
   { field: 'blog_doc_link', label: 'Blog Doc' },
   { field: 'blog_link', label: 'Blog Link' },
+  { field: 'published_date', label: 'Published' },
 ]
 
 function ContentCSVImport({ clients }) {
