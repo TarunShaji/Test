@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Upload, CheckCircle, AlertCircle, Loader2, Key, FileText, ListTodo } from 'lucide-react'
 import { rowToContent, getMappedHeaders } from '@/lib/import/content-mapping'
-import { rowToTask } from '@/lib/import/task-mapping'
+import { rowToTask, rowToClickUpTask } from '@/lib/import/task-mapping'
 
 
 function parseSpreadsheet(text) {
@@ -99,7 +99,8 @@ export default function ImportPage() {
         <TabsList className="mb-6">
           <TabsTrigger value="tasks-csv" className="flex items-center gap-1.5"><ListTodo className="w-3.5 h-3.5" />Tasks — CSV</TabsTrigger>
           <TabsTrigger value="content-csv" className="flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" />Content Calendar — CSV</TabsTrigger>
-          <TabsTrigger value="clickup" className="flex items-center gap-1.5"><Key className="w-3.5 h-3.5" />ClickUp</TabsTrigger>
+          <TabsTrigger value="clickup-csv" className="flex items-center gap-1.5"><Key className="w-3.5 h-3.5" />ClickUp CSV</TabsTrigger>
+          <TabsTrigger value="clickup" className="flex items-center gap-1.5"><Key className="w-3.5 h-3.5" />ClickUp API</TabsTrigger>
         </TabsList>
 
         <TabsContent value="tasks-csv">
@@ -108,6 +109,10 @@ export default function ImportPage() {
 
         <TabsContent value="content-csv">
           <ContentCSVImport clients={clients} />
+        </TabsContent>
+
+        <TabsContent value="clickup-csv">
+          <ClickUpCSVImport clients={clients} />
         </TabsContent>
 
         <TabsContent value="clickup">
@@ -357,6 +362,128 @@ function FormatGuide({ actionLabel }) {
         </div>
       </CardContent>
     </Card>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CLICKUP CSV IMPORT — One-time, isolated, minimal 4-field mapping
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const CLICKUP_PREVIEW_COLS = [
+  { field: 'title', label: 'Task Name' },
+  { field: 'status', label: 'Status' },
+  { field: 'priority', label: 'Priority' },
+  { field: 'eta_end', label: 'Date Updated (→ ETA)' },
+]
+
+function ClickUpCSVImport({ clients }) {
+  const [selectedClient, setSelectedClient] = useState('__none__')
+  const [rawData, setRawData] = useState('')
+  const [parsed, setParsed] = useState(null)
+  const [mappedRows, setMappedRows] = useState([])
+  const [parseError, setParseError] = useState('')
+  const [importing, setImporting] = useState(false)
+  const [result, setResult] = useState(null)
+
+  const doParse = (text) => {
+    setParseError('')
+    try {
+      const p = parseSpreadsheet(text)
+      if (!p) { setParseError('Could not parse. Make sure there is a header row and at least one data row.'); setParsed(null); setMappedRows([]); return }
+      const mapped = p.rows.map(r => rowToClickUpTask(r, p.headers, 'preview')).filter(Boolean)
+      if (mapped.length === 0) {
+        setParsed({ ...p, validCount: 0, unsupported: true, unsupportedMsg: 'No rows with a recognisable "Task Name" column found.' })
+        setMappedRows([])
+        return
+      }
+      setParsed({ ...p, validCount: mapped.length })
+      setMappedRows(mapped)
+    } catch (e) { setParseError('Parse error: ' + (e?.message || 'Unknown error')); setParsed(null); setMappedRows([]) }
+  }
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0]; e.target.value = ''
+    if (!file) return
+    try { const text = await file.text(); setRawData(text); doParse(text) }
+    catch (e) { setParseError('Could not read file: ' + (e?.message || '')) }
+  }
+
+  const handleImport = async () => {
+    if (!parsed || selectedClient === '__none__') return
+    setImporting(true); setResult(null)
+    const tasks = safeArray(parsed.rows).map(r => rowToClickUpTask(r, parsed.headers, selectedClient)).filter(Boolean)
+    if (tasks.length === 0) {
+      setResult({ success: 0, failed: parsed.rows.length, total: parsed.rows.length, error: 'No valid tasks found — ensure your CSV has a "Task Name" column.' })
+      setImporting(false); return
+    }
+    try {
+      const res = await apiFetch('/api/tasks/bulk', { method: 'POST', body: JSON.stringify({ tasks, client_id: selectedClient }) })
+      let data = {}; try { data = await res.json() } catch (e) { /* ignore */ }
+      if (res.ok) {
+        setResult({ success: data.count ?? tasks.length, failed: data.failed ?? 0, total: tasks.length, errors: safeArray(data.errors) })
+        setParsed(null); setMappedRows([]); setRawData('')
+      } else { setResult({ success: 0, failed: tasks.length, total: tasks.length, error: data.error || `Server error (${res.status})` }) }
+    } catch (e) { setResult({ success: 0, failed: 0, total: 0, error: 'Network error: ' + (e?.message || 'Could not reach server') }) }
+    finally { setImporting(false) }
+  }
+
+  const mappedPreview = mappedRows.length > 0 && (
+    <Card className="border border-gray-200">
+      <CardHeader>
+        <CardTitle className="text-base">
+          Preview <span className="text-xs font-normal text-gray-400">(exactly what will be saved · {mappedRows.length} rows)</span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="p-0">
+        <div className="overflow-auto max-h-80">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="bg-gray-50 border-b">
+                {CLICKUP_PREVIEW_COLS.map(c => (
+                  <th key={c.field} className="px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap">{c.label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {mappedRows.slice(0, 8).map((row, i) => (
+                <tr key={i} className="hover:bg-gray-50">
+                  {CLICKUP_PREVIEW_COLS.map(c => (
+                    <td key={c.field} className="px-3 py-1.5 text-gray-700 max-w-[200px] truncate" title={row[c.field] || ''}>
+                      {row[c.field] || <span className="text-gray-300 italic">—</span>}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="px-4 py-3 border-t border-gray-100 bg-gray-50 text-xs text-gray-500">
+          <span className="font-medium">{mappedRows.length}</span> rows ready · Priorities mapped from ClickUp (URGENT→P0, HIGH→P1, NORMAL→P2, none→P3)
+        </div>
+      </CardContent>
+    </Card>
+  )
+
+  return (
+    <ImportShell
+      title="Upload ClickUp CSV Export"
+      hint={<span>Export from ClickUp → select columns: <b>Task Name, Status, Priority, Date Updated</b>. Other columns are ignored.</span>}
+      actionLabel="tasks"
+      clients={clients}
+      selectedClient={selectedClient}
+      setSelectedClient={setSelectedClient}
+      rawData={rawData}
+      setRawData={setRawData}
+      parsed={parsed}
+      parseError={parseError}
+      onFile={handleFile}
+      onParse={(text) => doParse(text || rawData)}
+      onImport={handleImport}
+      importing={importing}
+      result={result}
+      setResult={setResult}
+      customPreview={mappedPreview}
+    />
   )
 }
 
