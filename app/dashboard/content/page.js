@@ -1,8 +1,9 @@
 'use client'
 
-import { useEffect, useState, useRef, useMemo } from 'react'
+import { useEffect, useState, useRef, useMemo, Suspense } from 'react'
 import Link from 'next/link'
 import useSWR from 'swr'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { apiFetch, swrFetcher } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -11,6 +12,8 @@ import { EditableCell } from '@/components/EditableCell'
 import { LinkCell } from '@/components/LinkCell'
 import { FileText, Plus, Trash2, Filter, Search, GripVertical, GripHorizontal } from 'lucide-react'
 import { safeJSON, safeArray } from '@/lib/safe'
+import { Pagination } from '@/components/Pagination'
+import { ClientSwitcher } from '@/components/ClientSwitcher'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import {
   DndContext,
@@ -44,18 +47,63 @@ const DEFAULT_COL_ORDER = [
   'link', 'published', 'actions'
 ]
 
-export default function ContentCalendarPage() {
-  const { data: contentData, mutate: mutateContent, error: contentErr } = useSWR('/api/content', swrFetcher)
+function ContentCalendarContent() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+
+  // Sync state with URL
+  const filterClient = searchParams.get('client_id') || 'all'
+  const filterStatus = searchParams.get('blog_status') || 'all'
+  const filterWeek = searchParams.get('week') || ''
+  const filterWriter = searchParams.get('writer') || ''
+  const filterTopicApproval = searchParams.get('topic_approval') || 'all'
+  const filterInternalApproval = searchParams.get('internal_approval') || 'all'
+  const filterClientApproval = searchParams.get('client_approval') || 'all'
+  const filterPublished = searchParams.get('published') || 'all'
+  const filterSearch = searchParams.get('search') || ''
+  const page = parseInt(searchParams.get('page')) || 1
+
+  const queryParams = new URLSearchParams(searchParams.toString())
+  if (!queryParams.get('limit')) queryParams.set('limit', '50')
+
+  const { data: contentResponse, mutate: mutateContent, error: contentErr } = useSWR(`/api/content?${queryParams.toString()}`, swrFetcher)
   const { data: clientsData } = useSWR('/api/clients', swrFetcher)
 
-  const content = useMemo(() => safeArray(contentData), [contentData])
+  const content = useMemo(() => safeArray(contentResponse?.data), [contentResponse])
+  const pagination = useMemo(() => ({
+    total: contentResponse?.total || 0,
+    page: contentResponse?.page || 1,
+    totalPages: contentResponse?.totalPages || 1
+  }), [contentResponse])
+
   const clients = useMemo(() => safeArray(clientsData), [clientsData])
-  const loading = !contentData && !contentErr
+  const loading = !contentResponse && !contentErr
   const [saving, setSaving] = useState({})
-  const [filters, setFilters] = useState({ client_id: '', blog_status: '', search: '' })
-  const [showFilters, setShowFilters] = useState(false)
+
+  const [localSearch, setLocalSearch] = useState(filterSearch)
+  const [showFilters, setShowFilters] = useState(true)
   const [columnOrder, setColumnOrder] = useState([])
   const [confirmConfig, setConfirmConfig] = useState(null)
+
+  const updateQueryParams = (updates) => {
+    const params = new URLSearchParams(searchParams.toString())
+    Object.entries(updates).forEach(([key, value]) => {
+      if (value === 'all' || value === '') params.delete(key)
+      else params.set(key, value)
+    })
+    if (!updates.page) params.delete('page')
+    router.push(`/dashboard/content?${params.toString()}`)
+  }
+
+  // Debounced search
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (localSearch !== filterSearch) {
+        updateQueryParams({ search: localSearch })
+      }
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [localSearch])
 
   useEffect(() => {
     // Nuke the old v2 key so stale orders are gone
@@ -135,24 +183,7 @@ export default function ContentCalendarPage() {
     })
   }
 
-  // Filter content
-  const filtered = useMemo(() => content.filter(item => {
-    if (filters.client_id && item?.client_id !== filters.client_id) return false
-    if (filters.blog_status && item?.blog_status !== filters.blog_status) return false
-    if (filters.search) {
-      const search = filters.search.toLowerCase()
-      const matchTitle = item?.blog_title?.toLowerCase().includes(search)
-      const matchKeyword = item?.primary_keyword?.toLowerCase().includes(search)
-      const matchWriter = item?.writer?.toLowerCase().includes(search)
-      if (!matchTitle && !matchKeyword && !matchWriter) return false
-    }
-    return true
-  }), [content, filters])
-
-  // Stats
-  const published = useMemo(() => content.filter(c => c?.blog_status === 'Published').length, [content])
-  const drafts = useMemo(() => content.filter(c => c?.blog_status === 'Draft').length, [content])
-  const inProgress = useMemo(() => content.filter(c => c?.blog_status === 'In Progress' || c?.blog_status === 'Sent for Approval').length, [content])
+  const filtered = content
 
   const clientMap = useMemo(() => Object.fromEntries(clients.map(c => [c?.id, c?.name])), [clients])
 
@@ -163,9 +194,11 @@ export default function ContentCalendarPage() {
 
   const handleRowDragEnd = (event) => {
     const { active, over } = event
+    if (!over) return
     if (active.id !== over.id) {
       const oldIndex = content.findIndex((c) => c.id === active.id)
       const newIndex = content.findIndex((c) => c.id === over.id)
+      if (oldIndex === -1 || newIndex === -1) return
       const reordered = arrayMove(content, oldIndex, newIndex)
       mutateContent(reordered, false)
     }
@@ -173,6 +206,7 @@ export default function ContentCalendarPage() {
 
   const handleColDragEnd = (event) => {
     const { active, over } = event
+    if (!over) return
     if (active.id !== over.id) {
       setColumnOrder((items) => {
         const oldIndex = items.indexOf(active.id)
@@ -184,9 +218,6 @@ export default function ContentCalendarPage() {
     }
   }
 
-  if (loading) return <div className="p-8 text-gray-400">Loading...</div>
-
-  // --- Column and Row Components ---
   const SortableHeader = ({ id, label }) => {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: id || 'header' })
     const style = {
@@ -292,7 +323,6 @@ export default function ContentCalendarPage() {
 
   return (
     <div className="p-6">
-      {/* Header */}
       <div className="flex items-center justify-between mb-5">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Content Calendar</h1>
@@ -303,96 +333,157 @@ export default function ContentCalendarPage() {
         </Button>
       </div>
 
-      {/* Stats */}
       <div className="grid grid-cols-4 gap-4 mb-5">
         <div className="bg-white border border-gray-200 rounded-lg p-4 text-center">
-          <div className="text-2xl font-bold text-gray-900">{content.length}</div>
+          <div className="text-2xl font-bold text-gray-900">{pagination.total}</div>
           <div className="text-xs text-gray-500 mt-1">Total Posts</div>
         </div>
         <div className="bg-white border border-gray-200 rounded-lg p-4 text-center">
-          <div className="text-2xl font-bold text-green-600">{published}</div>
+          <div className="text-2xl font-bold text-green-600">{contentResponse?.stats?.published || 0}</div>
           <div className="text-xs text-gray-500 mt-1">Published</div>
         </div>
         <div className="bg-white border border-gray-200 rounded-lg p-4 text-center">
-          <div className="text-2xl font-bold text-blue-600">{inProgress}</div>
+          <div className="text-2xl font-bold text-blue-600">{contentResponse?.stats?.inProgress || 0}</div>
           <div className="text-xs text-gray-500 mt-1">In Progress</div>
         </div>
         <div className="bg-white border border-gray-200 rounded-lg p-4 text-center">
-          <div className="text-2xl font-bold text-gray-400">{drafts}</div>
+          <div className="text-2xl font-bold text-gray-400">{contentResponse?.stats?.drafts || 0}</div>
           <div className="text-xs text-gray-500 mt-1">Drafts</div>
         </div>
       </div>
 
-      {/* Always-visible search + collapsible filter bar */}
+      <ClientSwitcher
+        clients={clients}
+        activeId={filterClient}
+        onSelect={(id) => updateQueryParams({ client_id: id })}
+      />
+
       <div className="flex flex-wrap gap-2 mb-4 p-3 bg-white border border-gray-200 rounded-lg items-center">
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
           <Input
-            type="text" placeholder="Search blog title, keyword, writer…"
-            value={filters.search} onChange={e => setFilters(f => ({ ...f, search: e.target.value }))}
+            type="text" placeholder="Search blog titles..."
+            value={localSearch} onChange={e => setLocalSearch(e.target.value)}
             className="h-8 text-xs pl-8 w-60 border-gray-200"
           />
         </div>
+
         {showFilters && (
           <>
-            <Select value={filters.client_id || '__all__'} onValueChange={v => setFilters(f => ({ ...f, client_id: v === '__all__' ? '' : v }))}>
-              <SelectTrigger className="w-44 h-8 text-xs"><SelectValue placeholder="All Clients" /></SelectTrigger>
+            <Input
+              type="text" placeholder="Week..."
+              value={filterWeek} onChange={e => updateQueryParams({ week: e.target.value })}
+              className="w-24 h-8 text-xs border-gray-200"
+            />
+            <Input
+              type="text" placeholder="Writer..."
+              value={filterWriter} onChange={e => updateQueryParams({ writer: e.target.value })}
+              className="w-32 h-8 text-xs border-gray-200"
+            />
+            <Select value={filterTopicApproval} onValueChange={v => updateQueryParams({ topic_approval: v })}>
+              <SelectTrigger className="w-32 h-8 text-xs"><SelectValue placeholder="Topic Appr." /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="__all__">All Clients</SelectItem>
-                {safeArray(clients).map(c => <SelectItem key={c?.id} value={c?.id}>{c?.name}</SelectItem>)}
+                <SelectItem value="all">Any Topic Appr.</SelectItem>
+                {TOPIC_APPROVALS.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
               </SelectContent>
             </Select>
-            <Select value={filters.blog_status || '__all__'} onValueChange={v => setFilters(f => ({ ...f, blog_status: v === '__all__' ? '' : v }))}>
-              <SelectTrigger className="w-36 h-8 text-xs"><SelectValue placeholder="All Statuses" /></SelectTrigger>
+            <Select value={filterStatus} onValueChange={v => updateQueryParams({ blog_status: v })}>
+              <SelectTrigger className="w-32 h-8 text-xs"><SelectValue placeholder="Blog Status" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="__all__">All Statuses</SelectItem>
+                <SelectItem value="all">Any Status</SelectItem>
                 {BLOG_STATUSES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={filterInternalApproval} onValueChange={v => updateQueryParams({ internal_approval: v })}>
+              <SelectTrigger className="w-32 h-8 text-xs"><SelectValue placeholder="Int. Appr." /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Any Int. Appr.</SelectItem>
+                {CONTENT_INTERNAL_APPROVALS.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={filterClientApproval} onValueChange={v => updateQueryParams({ client_approval: v })}>
+              <SelectTrigger className="w-32 h-8 text-xs"><SelectValue placeholder="Client Appr." /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Any Client Appr.</SelectItem>
+                {BLOG_APPROVALS.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={filterPublished} onValueChange={v => updateQueryParams({ published: v })}>
+              <SelectTrigger className="w-28 h-8 text-xs"><SelectValue placeholder="Published?" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Any Publish</SelectItem>
+                <SelectItem value="yes">Yes</SelectItem>
+                <SelectItem value="no">No</SelectItem>
               </SelectContent>
             </Select>
           </>
         )}
-        {(filters.search || filters.client_id || filters.blog_status) && (
-          <button onClick={() => setFilters({ client_id: '', blog_status: '', search: '' })} className="text-xs text-gray-400 hover:text-gray-600 underline ml-1">Clear</button>
+        {(filterSearch || filterClient !== 'all' || filterStatus !== 'all' || filterWeek || filterWriter || filterTopicApproval !== 'all' || filterInternalApproval !== 'all' || filterClientApproval !== 'all' || filterPublished !== 'all') && (
+          <button onClick={() => {
+            updateQueryParams({
+              client_id: 'all', blog_status: 'all', week: '', writer: '',
+              topic_approval: 'all', internal_approval: 'all', client_approval: 'all',
+              published: 'all', search: ''
+            })
+            setLocalSearch('')
+          }} className="text-xs text-gray-400 hover:text-gray-600 underline ml-1">Clear</button>
         )}
       </div>
 
-      {/* Main Table with DnD */}
-      <div className="bg-white border border-gray-200 rounded-lg overflow-auto shadow-sm">
+      <div className="bg-white border border-gray-200 rounded-lg overflow-auto shadow-sm text-xs">
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleColDragEnd} modifiers={[restrictToHorizontalAxis]}>
-          <table className="w-full text-sm" style={{ minWidth: '1700px', tableLayout: 'fixed' }}>
-            <thead>
-              <SortableContext items={columnOrder} strategy={horizontalListSortingStrategy}>
-                <tr className="border-b border-gray-100 bg-gray-50/80 sticky top-0 z-10 text-xs">
-                  {columnOrder.map(colId => (
-                    <SortableHeader key={colId} id={colId} label={columnLabels[colId] || colId} />
-                  ))}
-                </tr>
-              </SortableContext>
-            </thead>
-            <tbody className="divide-y divide-gray-50">
-              {filtered.length === 0 ? (
-                <tr>
-                  <td colSpan={columnOrder.length} className="py-16 text-center text-gray-400">
-                    <FileText className="w-8 h-8 mx-auto mb-2 text-gray-200" />
-                    {content.length === 0 ? 'No content calendar items yet.' : 'No items match your filters.'}
-                  </td>
-                </tr>
-              ) : (
-                <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleRowDragEnd} modifiers={[restrictToVerticalAxis]}>
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleRowDragEnd} modifiers={[restrictToVerticalAxis]}>
+            <table className="w-full text-sm" style={{ minWidth: '1700px', tableLayout: 'fixed' }}>
+              <thead>
+                <SortableContext items={columnOrder} strategy={horizontalListSortingStrategy}>
+                  <tr className="border-b border-gray-100 bg-gray-50/80 sticky top-0 z-10 text-xs">
+                    {columnOrder.map(colId => (
+                      <SortableHeader key={colId} id={colId} label={columnLabels[colId] || colId} />
+                    ))}
+                  </tr>
+                </SortableContext>
+              </thead>
+              <tbody className="divide-y divide-gray-50 text-xs">
+                {loading ? (
+                  <tr><td colSpan={columnOrder.length} className="py-16 text-center text-gray-400">Loading...</td></tr>
+                ) : filtered.length === 0 ? (
+                  <tr>
+                    <td colSpan={columnOrder.length} className="py-16 text-center text-gray-400">
+                      <FileText className="w-8 h-8 mx-auto mb-2 text-gray-200" />
+                      {content.length === 0 ? 'No content calendar items yet.' : 'No items match your filters.'}
+                    </td>
+                  </tr>
+                ) : (
                   <SortableContext items={filtered.map(i => i?.id)} strategy={verticalListSortingStrategy}>
-                    {filtered.map(item => <SortableRow key={item?.id} item={item} />)}
+                    {filtered.map(item => <SortableRow key={item.id} item={item} />)}
                   </SortableContext>
-                </DndContext>
-              )}
-            </tbody>
-          </table>
+                )}
+              </tbody>
+            </table>
+          </DndContext>
         </DndContext>
       </div>
 
-      <div className="mt-4 text-xs text-gray-400">
-        Showing {filtered.length} of {content.length} items • Drag headers to reorder columns
+      <div className="mt-4 flex items-center justify-between">
+        <div className="text-xs text-gray-400">
+          Drag headers to reorder columns
+        </div>
+        <Pagination
+          total={pagination.total}
+          page={pagination.page}
+          totalPages={pagination.totalPages}
+          onPageChange={p => updateQueryParams({ page: p })}
+        />
       </div>
       <ConfirmDialog config={confirmConfig} onClose={() => setConfirmConfig(null)} />
     </div>
+  )
+}
+
+export default function ContentCalendarPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-gray-400">Loading...</div>}>
+      <ContentCalendarContent />
+    </Suspense>
   )
 }

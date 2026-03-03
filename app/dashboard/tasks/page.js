@@ -1,16 +1,19 @@
 'use client'
 
-import { useEffect, useState, useRef, useMemo } from 'react'
+import { useEffect, useState, useRef, useMemo, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { apiFetch } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Plus, Trash2, RefreshCw, Link2, GripVertical, GripHorizontal, Search } from 'lucide-react'
+import { Plus, Trash2, RefreshCw, GripVertical, GripHorizontal, Search } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { safeJSON, safeArray } from '@/lib/safe'
 import { EditableCell } from '@/components/EditableCell'
 import { LinkCell } from '@/components/LinkCell'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { Pagination } from '@/components/Pagination'
+import { ClientSwitcher } from '@/components/ClientSwitcher'
 import { STATUSES, CATEGORIES, PRIORITIES, APPROVALS, INTERNAL_APPROVALS, statusColors, priorityColors, approvalColors, internalApprovalColors, TASK_COLUMN_WIDTHS } from '@/lib/constants'
 import {
   DndContext,
@@ -29,14 +32,18 @@ import {
   useSortable,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { restrictToFirstScrollableAncestor, restrictToHorizontalAxis, restrictToVerticalAxis } from '@dnd-kit/modifiers'
+import { restrictToHorizontalAxis, restrictToVerticalAxis } from '@dnd-kit/modifiers'
 
 
-export default function AllTasksPage() {
+function TasksPageContent() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+
   const [tasks, setTasks] = useState([])
   const [clients, setClients] = useState([])
   const [members, setMembers] = useState([])
   const [loading, setLoading] = useState(true)
+  const [pagination, setPagination] = useState({ total: 0, page: 1, totalPages: 1 })
   const [saving, setSaving] = useState({})
   const [selected, setSelected] = useState([])
   const [bulkAction, setBulkAction] = useState('__none__')
@@ -44,17 +51,27 @@ export default function AllTasksPage() {
   const [addingTask, setAddingTask] = useState(false)
   const [confirmConfig, setConfirmConfig] = useState(null)
 
-  // Filters – use sentinel 'all' so SelectItem never gets value=""
-  const [filterClient, setFilterClient] = useState('all')
-  const [filterStatus, setFilterStatus] = useState('all')
-  const [filterCategory, setFilterCategory] = useState('all')
-  const [filterAssignee, setFilterAssignee] = useState('all')
-  const [filterPriority, setFilterPriority] = useState('all')
-  const [filterSearch, setFilterSearch] = useState('')
-  const [sortField, setSortField] = useState('created_at')
-  const [sortDir, setSortDir] = useState('desc')
+  // Sync state with URL
+  const filterClient = searchParams.get('client_id') || 'all'
+  const filterStatus = searchParams.get('status') || 'all'
+  const filterCategory = searchParams.get('category') || 'all'
+  const filterAssignee = searchParams.get('assigned_to') || 'all'
+  const filterPriority = searchParams.get('priority') || 'all'
+  const filterSearch = searchParams.get('search') || ''
+  const page = parseInt(searchParams.get('page')) || 1
 
+  const [localSearch, setLocalSearch] = useState(filterSearch)
   const [columnOrder, setColumnOrder] = useState([])
+
+  const updateQueryParams = (updates) => {
+    const params = new URLSearchParams(searchParams.toString())
+    Object.entries(updates).forEach(([key, value]) => {
+      if (value === 'all' || value === '') params.delete(key)
+      else params.set(key, value)
+    })
+    if (!updates.page) params.delete('page')
+    router.push(`/dashboard/tasks?${params.toString()}`)
+  }
 
   useEffect(() => {
     const saved = localStorage.getItem('tasks_column_order_v2')
@@ -63,18 +80,10 @@ export default function AllTasksPage() {
     else setColumnOrder(['selection', 'client', 'title', 'category', 'status', 'priority', 'eta', 'assigned', 'link', 'internal_approval', 'send_link', 'client_approval', 'client_feedback', 'actions'])
   }, [])
 
-  const saveColumnOrder = (newOrder) => {
-    setColumnOrder(newOrder)
-    localStorage.setItem('tasks_column_order_v2', JSON.stringify(newOrder))
-  }
-
   const loadData = async () => {
-    const params = new URLSearchParams()
-    if (filterClient !== 'all') params.set('client_id', filterClient)
-    if (filterStatus !== 'all') params.set('status', filterStatus)
-    if (filterCategory !== 'all') params.set('category', filterCategory)
-    if (filterAssignee !== 'all') params.set('assigned_to', filterAssignee)
-    if (filterPriority !== 'all') params.set('priority', filterPriority)
+    setLoading(true)
+    const params = new URLSearchParams(searchParams.toString())
+    if (!params.get('limit')) params.set('limit', '50')
 
     const [tasksRes, clientsRes, membersRes] = await Promise.all([
       apiFetch(`/api/tasks?${params.toString()}`),
@@ -84,13 +93,28 @@ export default function AllTasksPage() {
     const [tasksData, clientsData, membersData] = await Promise.all([
       tasksRes.json(), clientsRes.json(), membersRes.json(),
     ])
-    setTasks(safeArray(tasksData))
+
+    setTasks(safeArray(tasksData.data))
+    setPagination({
+      total: tasksData.total || 0,
+      page: tasksData.page || 1,
+      totalPages: tasksData.totalPages || 1
+    })
     setClients(safeArray(clientsData))
     setMembers(safeArray(membersData))
     setLoading(false)
   }
 
-  useEffect(() => { loadData() }, [filterClient, filterStatus, filterCategory, filterAssignee, filterPriority])
+  useEffect(() => { loadData() }, [searchParams])
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (localSearch !== filterSearch) {
+        updateQueryParams({ search: localSearch })
+      }
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [localSearch])
 
   const updateTask = async (taskId, field, value) => {
     const task = safeArray(tasks).find(t => t?.id === taskId)
@@ -186,28 +210,7 @@ export default function AllTasksPage() {
   const memberMap = useMemo(() => Object.fromEntries(safeArray(members).map(m => [m?.id, m?.name])), [members])
   const anyFilter = useMemo(() => filterClient !== 'all' || filterStatus !== 'all' || filterCategory !== 'all' || filterAssignee !== 'all' || filterPriority !== 'all' || filterSearch.trim() !== '', [filterClient, filterStatus, filterCategory, filterAssignee, filterPriority, filterSearch])
 
-  const sorted = useMemo(() => {
-    let base = allTasks
-    if (filterSearch.trim()) {
-      const q = filterSearch.toLowerCase().trim()
-      base = base.filter(t => (t?.title || '').toLowerCase().includes(q))
-    }
-    if (!sortField) return base
-    return [...base].sort((a, b) => {
-      const va = a?.[sortField] || ''
-      const vb = b?.[sortField] || ''
-      return sortDir === 'asc' ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va))
-    })
-  }, [allTasks, sortField, sortDir, filterSearch])
-
-  const handleSort = (field) => {
-    if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
-    else { setSortField(field); setSortDir('asc') }
-  }
-
-  const SortIcon = ({ field }) => (
-    <span className="ml-1 text-gray-400">{sortField === field ? (sortDir === 'asc' ? '↑' : '↓') : ''}</span>
-  )
+  const sorted = allTasks
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -216,11 +219,12 @@ export default function AllTasksPage() {
 
   const handleRowDragEnd = (event) => {
     const { active, over } = event
+    if (!over) return
     if (active.id !== over.id) {
-      setSortField(null)
       setTasks((items) => {
         const oldIndex = items.findIndex((t) => t.id === active.id)
         const newIndex = items.findIndex((t) => t.id === over.id)
+        if (oldIndex === -1 || newIndex === -1) return items
         return arrayMove(items, oldIndex, newIndex)
       })
     }
@@ -228,6 +232,7 @@ export default function AllTasksPage() {
 
   const handleColDragEnd = (event) => {
     const { active, over } = event
+    if (!over) return
     if (active.id !== over.id) {
       setColumnOrder((items) => {
         const oldIndex = items.indexOf(active.id)
@@ -239,7 +244,6 @@ export default function AllTasksPage() {
     }
   }
 
-  // --- Column and Row Components ---
   const SortableHeader = ({ id, label, sortField: sField }) => {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: id || 'header' })
     const style = {
@@ -255,8 +259,8 @@ export default function AllTasksPage() {
           <div {...attributes} {...listeners} className="cursor-grab hover:text-blue-500 flex-shrink-0">
             <GripHorizontal className="w-3 h-3" />
           </div>
-          <span className={`truncate ${sField ? 'cursor-pointer hover:text-gray-900' : ''}`} onClick={() => sField && handleSort(sField)} title={label}>
-            {label} {sField && <SortIcon field={sField} />}
+          <span className={`truncate ${sField ? 'cursor-pointer hover:text-gray-900' : ''}`} title={label}>
+            {label}
           </span>
         </div>
       </th>
@@ -356,54 +360,52 @@ export default function AllTasksPage() {
       <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">All Tasks</h1>
-          <p className="text-gray-500 text-sm mt-1">{tasks.length} tasks across all clients</p>
+          <p className="text-gray-500 text-sm mt-1">{pagination.total} tasks across all clients</p>
         </div>
         <Button variant="outline" size="sm" onClick={loadData} className="gap-1">
           <RefreshCw className="w-4 h-4" /> Refresh
         </Button>
       </div>
 
-      {/* Filters omitted for brevity, same as before */}
+      <ClientSwitcher
+        clients={clients}
+        activeId={filterClient}
+        onSelect={(id) => updateQueryParams({ client_id: id })}
+      />
+
       <div className="flex flex-wrap gap-2 mb-4 p-3 bg-white border border-gray-200 rounded-lg">
-        {/* Search */}
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
           <Input
-            value={filterSearch}
-            onChange={e => setFilterSearch(e.target.value)}
-            placeholder="Search tasks…"
-            className="h-8 text-xs pl-8 w-44 border-gray-200"
+            value={localSearch}
+            onChange={e => setLocalSearch(e.target.value)}
+            placeholder="Search within tasks..."
+            className="h-8 text-xs pl-8 w-60 border-gray-200"
           />
         </div>
-        <Select value={filterClient} onValueChange={setFilterClient}>
-          <SelectTrigger className="h-8 text-xs w-36"><SelectValue placeholder="All Clients" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all" className="text-xs">All Clients</SelectItem>
-            {safeArray(clients).map(c => <SelectItem key={c?.id} value={c?.id} className="text-xs">{c?.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={filterStatus} onValueChange={setFilterStatus}>
+
+        <Select value={filterStatus} onValueChange={v => updateQueryParams({ status: v })}>
           <SelectTrigger className="h-8 text-xs w-36"><SelectValue placeholder="All Statuses" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all" className="text-xs">All Statuses</SelectItem>
             {STATUSES.map(s => <SelectItem key={s} value={s} className="text-xs">{s === 'Pending Review' ? 'Review' : s}</SelectItem>)}
           </SelectContent>
         </Select>
-        <Select value={filterCategory} onValueChange={setFilterCategory}>
+        <Select value={filterCategory} onValueChange={v => updateQueryParams({ category: v })}>
           <SelectTrigger className="h-8 text-xs w-36"><SelectValue placeholder="All Categories" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all" className="text-xs">All Categories</SelectItem>
             {CATEGORIES.map(c => <SelectItem key={c} value={c} className="text-xs">{c}</SelectItem>)}
           </SelectContent>
         </Select>
-        <Select value={filterAssignee} onValueChange={setFilterAssignee}>
+        <Select value={filterAssignee} onValueChange={v => updateQueryParams({ assigned_to: v })}>
           <SelectTrigger className="h-8 text-xs w-36"><SelectValue placeholder="All Members" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all" className="text-xs">All Members</SelectItem>
             {safeArray(members).map(m => <SelectItem key={m?.id} value={m?.id} className="text-xs">{m?.name}</SelectItem>)}
           </SelectContent>
         </Select>
-        <Select value={filterPriority} onValueChange={setFilterPriority}>
+        <Select value={filterPriority} onValueChange={v => updateQueryParams({ priority: v })}>
           <SelectTrigger className="h-8 text-xs w-28"><SelectValue placeholder="All Priority" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all" className="text-xs">All Priority</SelectItem>
@@ -412,8 +414,11 @@ export default function AllTasksPage() {
         </Select>
         {anyFilter && (
           <Button variant="ghost" size="sm" className="h-8 text-xs text-gray-400" onClick={() => {
-            setFilterClient('all'); setFilterStatus('all'); setFilterCategory('all')
-            setFilterAssignee('all'); setFilterPriority('all'); setFilterSearch('')
+            updateQueryParams({
+              client_id: 'all', status: 'all', category: 'all',
+              assigned_to: 'all', priority: 'all', search: ''
+            })
+            setLocalSearch('')
           }}>Clear filters</Button>
         )}
       </div>
@@ -436,69 +441,81 @@ export default function AllTasksPage() {
         </div>
       )}
 
-      {/* Main Table with DnD */}
       <div className="bg-white border border-gray-200 rounded-lg overflow-auto shadow-sm">
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleColDragEnd} modifiers={[restrictToHorizontalAxis]}>
-          <table className="w-full text-sm" style={{ minWidth: '1800px', tableLayout: 'fixed' }}>
-            <thead>
-              <SortableContext items={columnOrder} strategy={horizontalListSortingStrategy}>
-                <tr className="border-b border-gray-200 bg-gray-50/80">
-                  {columnOrder.map(colId => (
-                    <SortableHeader key={colId} id={colId} label={columnLabels[colId]} sortField={columnSortFields[colId]} />
-                  ))}
-                </tr>
-              </SortableContext>
-            </thead>
-            <tbody className="divide-y divide-gray-50">
-              {loading ? (
-                <tr><td colSpan={columnOrder.length} className="px-4 py-8 text-center text-gray-400">Loading...</td></tr>
-              ) : sorted.length === 0 ? (
-                <tr><td colSpan={columnOrder.length} className="px-4 py-8 text-center text-gray-400">No tasks found</td></tr>
-              ) : (
-                <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleRowDragEnd} modifiers={[restrictToVerticalAxis]}>
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleRowDragEnd} modifiers={[restrictToVerticalAxis]}>
+            <table className="w-full text-sm" style={{ minWidth: '1800px', tableLayout: 'fixed' }}>
+              <thead>
+                <SortableContext items={columnOrder} strategy={horizontalListSortingStrategy}>
+                  <tr className="border-b border-gray-200 bg-gray-50/80">
+                    {columnOrder.map(colId => (
+                      <SortableHeader key={colId} id={colId} label={columnLabels[colId]} sortField={columnSortFields[colId]} />
+                    ))}
+                  </tr>
+                </SortableContext>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {loading ? (
+                  <tr><td colSpan={columnOrder.length} className="px-4 py-8 text-center text-gray-400">Loading...</td></tr>
+                ) : sorted.length === 0 ? (
+                  <tr><td colSpan={columnOrder.length} className="px-4 py-8 text-center text-gray-400">No tasks found</td></tr>
+                ) : (
                   <SortableContext items={sorted.map(t => t?.id)} strategy={verticalListSortingStrategy}>
-                    {sorted.map(task => <SortableRow key={task?.id} task={task} />)}
+                    {sorted.map(task => <SortableRow key={task.id} task={task} />)}
                   </SortableContext>
-                </DndContext>
-              )}
+                )}
 
-              {/* Quick Add Row - spans across the whole current column order */}
-              <tr className="bg-gray-50/30 border-t border-dashed border-gray-200">
-                <td className="px-3 py-2"></td>
-                <td className="px-3 py-2" colSpan={2}>
-                  <Select value={newTask.client_id || '__none__'} onValueChange={v => setNewTask(n => ({ ...n, client_id: v === '__none__' ? '' : v }))}>
-                    <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Client" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__" className="text-xs text-gray-400">Select client…</SelectItem>
-                      {safeArray(clients).map(c => <SelectItem key={c?.id} value={c?.id} className="text-xs">{c?.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </td>
-                <td className="px-3 py-2" colSpan={3}>
-                  <input
-                    type="text" value={newTask.title}
-                    onChange={e => setNewTask(n => ({ ...n, title: e.target.value }))}
-                    onKeyDown={e => e.key === 'Enter' && addTask()}
-                    placeholder="+ Add a task..."
-                    className="w-full text-xs px-2 py-1 bg-transparent border border-dashed border-gray-300 rounded focus:outline-none focus:border-blue-400 focus:bg-white"
-                    disabled={addingTask}
-                  />
-                </td>
-                <td colSpan={columnOrder.length - 6} className="px-3 py-2 text-right">
-                  <Button
-                    size="sm" variant="ghost" onClick={addTask}
-                    disabled={addingTask || !newTask.title.trim() || !newTask.client_id || newTask.client_id === '__none__'}
-                    className="text-xs h-7"
-                  >
-                    <Plus className="w-3 h-3 mr-1" />{addingTask ? 'Adding...' : 'Add'}
-                  </Button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+                <tr className="bg-gray-50/30 border-t border-dashed border-gray-200">
+                  <td className="px-3 py-2"></td>
+                  <td className="px-3 py-2" colSpan={2}>
+                    <Select value={newTask.client_id || '__none__'} onValueChange={v => setNewTask(n => ({ ...n, client_id: v === '__none__' ? '' : v }))}>
+                      <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Client" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__" className="text-xs text-gray-400">Select client…</SelectItem>
+                        {safeArray(clients).map(c => <SelectItem key={c?.id} value={c?.id} className="text-xs">{c?.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </td>
+                  <td className="px-3 py-2" colSpan={3}>
+                    <input
+                      type="text" value={newTask.title}
+                      onChange={e => setNewTask(n => ({ ...n, title: e.target.value }))}
+                      onKeyDown={e => e.key === 'Enter' && addTask()}
+                      placeholder="+ Add a task..."
+                      className="w-full text-xs px-2 py-1 bg-transparent border border-dashed border-gray-300 rounded focus:outline-none focus:border-blue-400 focus:bg-white"
+                      disabled={addingTask}
+                    />
+                  </td>
+                  <td colSpan={columnOrder.length - 6} className="px-3 py-2 text-right">
+                    <Button
+                      size="sm" variant="ghost" onClick={addTask}
+                      disabled={addingTask || !newTask.title.trim() || !newTask.client_id || newTask.client_id === '__none__'}
+                      className="text-xs h-7"
+                    >
+                      <Plus className="w-3 h-3 mr-1" />{addingTask ? 'Adding...' : 'Add'}
+                    </Button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </DndContext>
         </DndContext>
+        <Pagination
+          total={pagination.total}
+          page={pagination.page}
+          totalPages={pagination.totalPages}
+          onPageChange={(p) => updateQueryParams({ page: p })}
+        />
       </div>
       <ConfirmDialog config={confirmConfig} onClose={() => setConfirmConfig(null)} />
     </div>
+  )
+}
+
+export default function AllTasksPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-gray-400">Loading Dashboard...</div>}>
+      <TasksPageContent />
+    </Suspense>
   )
 }

@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useRef, useMemo } from 'react'
-import { useParams } from 'next/navigation'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import useSWR, { mutate } from 'swr'
 import { apiFetch, swrFetcher } from '@/lib/auth'
@@ -10,12 +10,13 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Pagination } from '@/components/Pagination'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { EditableCell } from '@/components/EditableCell'
 import { LinkCell } from '@/components/LinkCell'
-import { Plus, ExternalLink, Trash2, Link2, Settings, BarChart3, FileText, GripVertical, GripHorizontal, Folder, Image, Library } from 'lucide-react'
+import { Plus, ExternalLink, Trash2, Link2, Settings, BarChart3, FileText, GripVertical, GripHorizontal, Folder, Image, Library, Search } from 'lucide-react'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import {
   DndContext,
@@ -47,12 +48,92 @@ import {
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function ClientDetailPage() {
   const { id } = useParams()
+  const router = useRouter()
+  const searchParams = useSearchParams()
+
+  // --- Tasks State (from URL) ---
+  const tStatus = searchParams.get('status') || 'all'
+  const tCategory = searchParams.get('category') || 'all'
+  const tAssignee = searchParams.get('assigned_to') || 'all'
+  const tPriority = searchParams.get('priority') || 'all'
+  const tSearch = searchParams.get('search') || ''
+  const tPage = parseInt(searchParams.get('page')) || 1
+
+  // --- Content State (from URL - prefixed with c_) ---
+  const cStatus = searchParams.get('c_status') || 'all'
+  const cWeek = searchParams.get('c_week') || ''
+  const cWriter = searchParams.get('c_writer') || ''
+  const cTopic = searchParams.get('c_topic') || 'all'
+  const cInternal = searchParams.get('c_internal') || 'all'
+  const cClientAppr = searchParams.get('c_client') || 'all'
+  const cPublished = searchParams.get('c_published') || 'all'
+  const cSearch = searchParams.get('c_search') || ''
+  const cPage = parseInt(searchParams.get('c_page')) || 1
+
+  const updateQueryParams = (updates) => {
+    const params = new URLSearchParams(searchParams.toString())
+    Object.entries(updates).forEach(([key, value]) => {
+      if (value === 'all' || value === '') params.delete(key)
+      else params.set(key, value)
+    })
+    // Reset page if filters change (optional but often expected)
+    // For now keep it simple.
+    router.push(`/dashboard/clients/${id}?${params.toString()}`, { scroll: false })
+  }
+
+  // SWR hooks updated with params
+  const taskParams = new URLSearchParams()
+  taskParams.set('client_id', id)
+  if (tStatus !== 'all') taskParams.set('status', tStatus)
+  if (tCategory !== 'all') taskParams.set('category', tCategory)
+  if (tAssignee !== 'all') taskParams.set('assigned_to', tAssignee)
+  if (tPriority !== 'all') taskParams.set('priority', tPriority)
+  if (tSearch) taskParams.set('search', tSearch)
+  taskParams.set('page', tPage.toString())
+  taskParams.set('limit', '50')
+
+  const contentParams = new URLSearchParams()
+  contentParams.set('client_id', id)
+  if (cStatus !== 'all') contentParams.set('blog_status', cStatus)
+  if (cWeek) contentParams.set('week', cWeek)
+  if (cWriter) contentParams.set('writer', cWriter)
+  if (cTopic !== 'all') contentParams.set('topic_approval', cTopic)
+  if (cInternal !== 'all') contentParams.set('internal_approval', cInternal)
+  if (cClientAppr !== 'all') contentParams.set('client_approval', cClientAppr)
+  if (cPublished !== 'all') contentParams.set('published', cPublished)
+  if (cSearch) contentParams.set('search', cSearch)
+  contentParams.set('page', cPage.toString())
+  contentParams.set('limit', '50')
+
   const { data: client, mutate: mutateClient, error: clientErr } = useSWR(id ? `/api/clients/${id}` : null, swrFetcher)
-  const { data: tasks, mutate: mutateTasks } = useSWR(id ? `/api/tasks?client_id=${id}` : null, swrFetcher)
+  const { data: tasks, mutate: mutateTasks } = useSWR(id ? `/api/tasks?${taskParams.toString()}` : null, swrFetcher)
   const { data: reports, mutate: mutateReports } = useSWR(id ? `/api/reports?client_id=${id}` : null, swrFetcher)
-  const { data: content, mutate: mutateContent } = useSWR(id ? `/api/content?client_id=${id}` : null, swrFetcher)
+  const { data: content, mutate: mutateContent } = useSWR(id ? `/api/content?${contentParams.toString()}` : null, swrFetcher)
   const { data: resources, mutate: mutateResources } = useSWR(id ? `/api/clients/${id}/resources` : null, swrFetcher)
   const { data: members } = useSWR('/api/team', swrFetcher)
+
+  const [tLocalSearch, setTLocalSearch] = useState(tSearch)
+  const [cLocalSearch, setCLocalSearch] = useState(cSearch)
+
+  // Debounced search for Tasks
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (tLocalSearch !== tSearch) {
+        updateQueryParams({ search: tLocalSearch })
+      }
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [tLocalSearch])
+
+  // Debounced search for Content
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (cLocalSearch !== cSearch) {
+        updateQueryParams({ c_search: cLocalSearch })
+      }
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [cLocalSearch])
 
   const [saving, setSaving] = useState({})
   const [newTask, setNewTask] = useState({ title: '' })
@@ -433,9 +514,21 @@ export default function ClientDetailPage() {
     }
   }
 
-  const allTasks = useMemo(() => safeArray(tasks), [tasks])
+  const allTasks = useMemo(() => safeArray(tasks?.data || tasks), [tasks])
+  const tPagination = useMemo(() => ({
+    total: tasks?.total || 0,
+    page: tasks?.page || 1,
+    totalPages: tasks?.totalPages || 1
+  }), [tasks])
+
   const allReports = useMemo(() => safeArray(reports), [reports])
-  const allContent = useMemo(() => safeArray(content), [content])
+
+  const allContent = useMemo(() => safeArray(content?.data || content), [content])
+  const cPagination = useMemo(() => ({
+    total: content?.total || 0,
+    page: content?.page || 1,
+    totalPages: content?.totalPages || 1
+  }), [content])
   const allResources = useMemo(() => safeArray(resources), [resources])
   const allMembers = useMemo(() => safeArray(members), [members])
 
@@ -805,101 +898,207 @@ export default function ClientDetailPage() {
 
         {/* ── Timeline Tab ───────────────────────────────────────────────── */}
         <TabsContent value="timeline">
-          <div className="flex items-center justify-between mb-4 h-9">
-            <div className="flex items-center gap-3">
-              {selectedTasks.size > 0 && (
-                <div className="flex items-center gap-2 bg-red-50 px-3 py-1.5 rounded-lg border border-red-100">
-                  <span className="text-xs font-medium text-red-700">{selectedTasks.size} selected</span>
-                  <div className="w-px h-3 bg-red-200" />
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-6 px-2 text-red-600 hover:text-red-700 hover:bg-red-100 text-xs gap-1.5 font-bold"
-                    onClick={deleteSelectedTasks}
-                    disabled={bulkDeleting}
-                  >
-                    <Trash2 className="w-3 h-3" />
-                    Delete Selected
-                  </Button>
-                </div>
-              )}
+          <div className="flex flex-wrap items-center gap-2 mb-4 p-3 bg-white border border-gray-200 rounded-lg">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+              <Input
+                type="text" placeholder="Search tasks..."
+                value={tLocalSearch} onChange={e => setTLocalSearch(e.target.value)}
+                className="h-8 text-xs pl-8 w-48 border-gray-200"
+              />
             </div>
+            <Select value={tStatus} onValueChange={v => updateQueryParams({ status: v, page: 1 })}>
+              <SelectTrigger className="w-32 h-8 text-xs"><SelectValue placeholder="Status" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Any Status</SelectItem>
+                {STATUSES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={tCategory} onValueChange={v => updateQueryParams({ category: v, page: 1 })}>
+              <SelectTrigger className="w-32 h-8 text-xs"><SelectValue placeholder="Category" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Any Category</SelectItem>
+                {CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={tPriority} onValueChange={v => updateQueryParams({ priority: v, page: 1 })}>
+              <SelectTrigger className="w-28 h-8 text-xs"><SelectValue placeholder="Priority" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Any Priority</SelectItem>
+                {PRIORITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={tAssignee} onValueChange={v => updateQueryParams({ assigned_to: v, page: 1 })}>
+              <SelectTrigger className="w-32 h-8 text-xs"><SelectValue placeholder="Assignee" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Any Assignee</SelectItem>
+                {allMembers.map(m => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            {(tSearch || tStatus !== 'all' || tCategory !== 'all' || tPriority !== 'all' || tAssignee !== 'all') && (
+              <button onClick={() => {
+                updateQueryParams({ status: 'all', category: 'all', priority: 'all', assigned_to: 'all', search: '', page: 1 })
+                setTLocalSearch('')
+              }} className="text-xs text-blue-600 hover:text-blue-800 font-medium ml-1">Clear</button>
+            )}
+
+            <div className="flex-1" />
+
+            {selectedTasks.size > 0 && (
+              <Button
+                size="sm"
+                variant="destructive"
+                className="h-8 px-3 text-xs gap-1.5"
+                onClick={deleteSelectedTasks}
+                disabled={bulkDeleting}
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Delete {selectedTasks.size}
+              </Button>
+            )}
           </div>
           <div className="bg-white border border-gray-200 rounded-lg overflow-auto shadow-sm">
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleTaskColDragEnd} modifiers={[restrictToHorizontalAxis]}>
-              <table className="w-full text-sm" style={{ minWidth: '1800px', tableLayout: 'fixed' }}>
-                <thead>
-                  <SortableContext items={taskColOrder} strategy={horizontalListSortingStrategy}>
-                    <tr className="border-b border-gray-100 bg-gray-50/80 sticky top-0 z-10">
-                      {safeArray(taskColOrder).map(colId => (
-                        <SortableHeader key={colId} id={colId} label={taskColLabels[colId]} type="task" />
-                      ))}
-                    </tr>
-                  </SortableContext>
-                </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {allTasks.length === 0 ? (
-                    <tr>
-                      <td colSpan={taskColOrder.length} className="px-4 py-16 text-center text-gray-400">
-                        No tasks yet. Add your first task below.
-                      </td>
-                    </tr>
-                  ) : (
-                    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleTaskRowDragEnd} modifiers={[restrictToVerticalAxis]}>
+              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleTaskRowDragEnd} modifiers={[restrictToVerticalAxis]}>
+                <table className="w-full text-sm" style={{ minWidth: '1800px', tableLayout: 'fixed' }}>
+                  <thead>
+                    <SortableContext items={taskColOrder} strategy={horizontalListSortingStrategy}>
+                      <tr className="border-b border-gray-100 bg-gray-50/80 sticky top-0 z-10">
+                        {safeArray(taskColOrder).map(colId => (
+                          <SortableHeader key={colId} id={colId} label={taskColLabels[colId]} type="task" />
+                        ))}
+                      </tr>
+                    </SortableContext>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {allTasks.length === 0 ? (
+                      <tr>
+                        <td colSpan={taskColOrder.length} className="px-4 py-16 text-center text-gray-400">
+                          No tasks yet. Add your first task below.
+                        </td>
+                      </tr>
+                    ) : (
                       <SortableContext items={allTasks.map(t => t?.id)} strategy={verticalListSortingStrategy}>
                         {allTasks.map(task => <TaskSortableRow key={task?.id} task={task} />)}
                       </SortableContext>
-                    </DndContext>
-                  )}
-                  {/* Add row */}
-                  <tr className="bg-gray-50/30 border-t border-dashed border-gray-200">
-                    <td className="px-2 py-2"></td>
-                    <td className="px-3 py-2" colSpan={2}>
-                      <input
-                        type="text" value={newTask.title}
-                        onChange={e => setNewTask(n => ({ ...n, title: e.target.value }))}
-                        onKeyDown={e => e.key === 'Enter' && addTask()}
-                        placeholder="+ Add a task..."
-                        className="w-full text-xs px-2 py-1 bg-transparent border border-dashed border-gray-300 rounded focus:outline-none focus:border-blue-400 focus:bg-white"
-                        disabled={addingTask}
-                      />
-                    </td>
-                    <td colSpan={taskColOrder.length - 3} className="px-3 py-2 text-right">
-                      <Button size="sm" variant="ghost" onClick={addTask} disabled={addingTask || !newTask.title.trim()} className="text-xs h-7">
-                        <Plus className="w-3 h-3 mr-1" />{addingTask ? 'Adding...' : 'Add'}
-                      </Button>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+                    )}
+                    {/* Add row */}
+                    <tr className="bg-gray-50/30 border-t border-dashed border-gray-200">
+                      <td className="px-2 py-2"></td>
+                      <td className="px-3 py-2" colSpan={2}>
+                        <input
+                          type="text" value={newTask.title}
+                          onChange={e => setNewTask(n => ({ ...n, title: e.target.value }))}
+                          onKeyDown={e => e.key === 'Enter' && addTask()}
+                          placeholder="+ Add a task..."
+                          className="w-full text-xs px-2 py-1 bg-transparent border border-dashed border-gray-300 rounded focus:outline-none focus:border-blue-400 focus:bg-white"
+                          disabled={addingTask}
+                        />
+                      </td>
+                      <td colSpan={taskColOrder.length - 3} className="px-3 py-2 text-right">
+                        <Button size="sm" variant="ghost" onClick={addTask} disabled={addingTask || !newTask.title.trim()} className="text-xs h-7">
+                          <Plus className="w-3 h-3 mr-1" />{addingTask ? 'Adding...' : 'Add'}
+                        </Button>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </DndContext>
             </DndContext>
+          </div>
+
+          <div className="mt-4 flex items-center justify-between">
+            <div className="text-xs text-gray-400">
+              Drag headers to reorder columns
+            </div>
+            <Pagination
+              total={tPagination.total}
+              page={tPagination.page}
+              totalPages={tPagination.totalPages}
+              onPageChange={p => updateQueryParams({ page: p })}
+            />
           </div>
         </TabsContent>
 
         {/* ── Content Calendar Tab ─────────────────────────────────────────── */}
         <TabsContent value="content">
-          <div className="flex items-center justify-between mb-4 h-9">
-            <div className="flex items-center gap-3">
-              {selectedContent.size > 0 && (
-                <div className="flex items-center gap-2 bg-red-50 px-3 py-1.5 rounded-lg border border-red-100">
-                  <span className="text-xs font-medium text-red-700">{selectedContent.size} selected</span>
-                  <div className="w-px h-3 bg-red-200" />
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-6 px-2 text-red-600 hover:text-red-700 hover:bg-red-100 text-xs gap-1.5 font-bold"
-                    onClick={deleteSelectedContent}
-                    disabled={bulkDeletingContent}
-                  >
-                    <Trash2 className="w-3 h-3" />
-                    Delete Selected
-                  </Button>
-                </div>
-              )}
+          <div className="flex flex-wrap items-center gap-2 mb-4 p-3 bg-white border border-gray-200 rounded-lg">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+              <Input
+                type="text" placeholder="Search blog titles..."
+                value={cLocalSearch} onChange={e => setCLocalSearch(e.target.value)}
+                className="h-8 text-xs pl-8 w-48 border-gray-200"
+              />
             </div>
+            <Input
+              type="text" placeholder="Week..."
+              value={cWeek} onChange={e => updateQueryParams({ c_week: e.target.value, c_page: 1 })}
+              className="w-20 h-8 text-xs border-gray-200"
+            />
+            <Input
+              type="text" placeholder="Writer..."
+              value={cWriter} onChange={e => updateQueryParams({ c_writer: e.target.value, c_page: 1 })}
+              className="w-28 h-8 text-xs border-gray-200"
+            />
+            <Select value={cTopic} onValueChange={v => updateQueryParams({ c_topic: v, c_page: 1 })}>
+              <SelectTrigger className="w-32 h-8 text-xs"><SelectValue placeholder="Topic Appr." /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Any Topic Appr.</SelectItem>
+                {TOPIC_APPROVALS.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={cStatus} onValueChange={v => updateQueryParams({ c_status: v, c_page: 1 })}>
+              <SelectTrigger className="w-32 h-8 text-xs"><SelectValue placeholder="Blog Status" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Any Status</SelectItem>
+                {BLOG_STATUSES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={cInternal} onValueChange={v => updateQueryParams({ c_internal: v, c_page: 1 })}>
+              <SelectTrigger className="w-32 h-8 text-xs"><SelectValue placeholder="Int. Appr." /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Any Int. Appr.</SelectItem>
+                {CONTENT_INTERNAL_APPROVALS.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={cPublished} onValueChange={v => updateQueryParams({ c_published: v, c_page: 1 })}>
+              <SelectTrigger className="w-28 h-8 text-xs"><SelectValue placeholder="Published?" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Any Publish</SelectItem>
+                <SelectItem value="yes">Yes</SelectItem>
+                <SelectItem value="no">No</SelectItem>
+              </SelectContent>
+            </Select>
+
+            {(cSearch || cStatus !== 'all' || cWeek || cWriter || cTopic !== 'all' || cInternal !== 'all' || cPublished !== 'all') && (
+              <button onClick={() => {
+                updateQueryParams({
+                  c_status: 'all', c_week: '', c_writer: '',
+                  c_topic: 'all', c_internal: 'all', c_client: 'all',
+                  c_published: 'all', c_search: '', c_page: 1
+                })
+                setCLocalSearch('')
+              }} className="text-xs text-blue-600 hover:text-blue-800 font-medium ml-1">Clear</button>
+            )}
+
+            <div className="flex-1" />
+
+            {selectedContent.size > 0 && (
+              <Button
+                size="sm"
+                variant="destructive"
+                className="h-8 px-3 text-xs gap-1.5 mr-2"
+                onClick={deleteSelectedContent}
+                disabled={bulkDeletingContent}
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Delete {selectedContent.size}
+              </Button>
+            )}
             <Button
               size="sm"
-              className="gap-1.5 h-8"
+              className="gap-1.5 h-8 px-4"
               onClick={() => { addContentInputRef.current?.focus(); addContentInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }) }}
             >
               <Plus className="w-4 h-4" /> Add Content
@@ -907,54 +1106,68 @@ export default function ClientDetailPage() {
           </div>
           <div className="bg-white border border-gray-200 rounded-lg overflow-auto shadow-sm">
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleContentColDragEnd} modifiers={[restrictToHorizontalAxis]}>
-              <table className="w-full text-sm" style={{ minWidth: '2000px', tableLayout: 'fixed' }}>
-                <thead>
-                  <SortableContext items={contentColOrder} strategy={horizontalListSortingStrategy}>
-                    <tr className="border-b border-gray-100 bg-gray-50/80 sticky top-0 z-10">
-                      {safeArray(contentColOrder).map(colId => (
-                        <SortableHeader key={colId} id={colId} label={contentColLabels[colId]} type="content" />
-                      ))}
-                    </tr>
-                  </SortableContext>
-                </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {allContent.length === 0 ? (
-                    <tr>
-                      <td colSpan={contentColOrder.length} className="px-4 py-16 text-center text-gray-400">
-                        <FileText className="w-8 h-8 mx-auto mb-2 text-gray-200" />
-                        No content calendar items yet. Add your first blog post below.
+              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleContentRowDragEnd} modifiers={[restrictToVerticalAxis]}>
+                <table className="w-full text-sm" style={{ minWidth: '2000px', tableLayout: 'fixed' }}>
+                  <thead>
+                    <SortableContext items={contentColOrder} strategy={horizontalListSortingStrategy}>
+                      <tr className="border-b border-gray-100 bg-gray-50/80 sticky top-0 z-10">
+                        {safeArray(contentColOrder).map(colId => (
+                          <SortableHeader key={colId} id={colId} label={contentColLabels[colId]} type="content" />
+                        ))}
+                      </tr>
+                    </SortableContext>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {allContent.length === 0 ? (
+                      <tr>
+                        <td colSpan={contentColOrder.length} className="px-4 py-16 text-center text-gray-400">
+                          <FileText className="w-8 h-8 mx-auto mb-2 text-gray-200" />
+                          No content calendar items yet. Add your first blog post below.
+                        </td>
+                      </tr>
+                    ) : (
+                      <SortableContext items={allContent.map(i => i?.id)} strategy={verticalListSortingStrategy}>
+                        {allContent.map(item => (
+                          <ContentSortableRow key={item?.id} item={item} />
+                        ))}
+                      </SortableContext>
+                    )}
+                    {/* Add row */}
+                    <tr className="bg-gray-50/30 border-t border-dashed border-gray-200">
+                      <td className="px-2 py-2"></td>
+                      <td className="px-3 py-2" colSpan={2}>
+                        <input
+                          ref={addContentInputRef}
+                          type="text" value={newContent.blog_title}
+                          onChange={e => setNewContent(n => ({ ...n, blog_title: e.target.value }))}
+                          onKeyDown={e => e.key === 'Enter' && addContent()}
+                          placeholder="+ Add a blog post..."
+                          className="w-full text-xs px-2 py-1 bg-transparent border border-dashed border-gray-300 rounded focus:outline-none focus:border-blue-400 focus:bg-white"
+                          disabled={addingContent}
+                        />
+                      </td>
+                      <td colSpan={contentColOrder.length - 3} className="px-3 py-2 text-right">
+                        <Button size="sm" variant="ghost" onClick={addContent} disabled={addingContent || !newContent.blog_title.trim()} className="text-xs h-7">
+                          <Plus className="w-3 h-3 mr-1" />{addingContent ? 'Adding...' : 'Add'}
+                        </Button>
                       </td>
                     </tr>
-                  ) : (
-                    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleContentRowDragEnd} modifiers={[restrictToVerticalAxis]}>
-                      <SortableContext items={allContent.map(i => i?.id)} strategy={verticalListSortingStrategy}>
-                        {allContent.map(item => <ContentSortableRow key={item?.id} item={item} />)}
-                      </SortableContext>
-                    </DndContext>
-                  )}
-                  {/* Add row */}
-                  <tr className="bg-gray-50/30 border-t border-dashed border-gray-200">
-                    <td className="px-2 py-2"></td>
-                    <td className="px-3 py-2" colSpan={2}>
-                      <input
-                        ref={addContentInputRef}
-                        type="text" value={newContent.blog_title}
-                        onChange={e => setNewContent(n => ({ ...n, blog_title: e.target.value }))}
-                        onKeyDown={e => e.key === 'Enter' && addContent()}
-                        placeholder="+ Add a blog post..."
-                        className="w-full text-xs px-2 py-1 bg-transparent border border-dashed border-gray-300 rounded focus:outline-none focus:border-blue-400 focus:bg-white"
-                        disabled={addingContent}
-                      />
-                    </td>
-                    <td colSpan={contentColOrder.length - 3} className="px-3 py-2 text-right">
-                      <Button size="sm" variant="ghost" onClick={addContent} disabled={addingContent || !newContent.blog_title.trim()} className="text-xs h-7">
-                        <Plus className="w-3 h-3 mr-1" />{addingContent ? 'Adding...' : 'Add'}
-                      </Button>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+                  </tbody>
+                </table>
+              </DndContext>
             </DndContext>
+          </div>
+
+          <div className="mt-4 flex items-center justify-between">
+            <div className="text-xs text-gray-400">
+              Drag headers to reorder columns
+            </div>
+            <Pagination
+              total={cPagination.total}
+              page={cPagination.page}
+              totalPages={cPagination.totalPages}
+              onPageChange={p => updateQueryParams({ c_page: p })}
+            />
           </div>
         </TabsContent>
 

@@ -34,6 +34,9 @@ async function applyIndexes() {
         // 4. Content Items Collection
         console.log('Indexing content_items collection...');
         await db.collection('content_items').createIndex({ client_id: 1 });
+        await db.collection('content_items').createIndex({ blog_status: 1 });
+        await db.collection('content_items').createIndex({ writer: 1 });
+        await db.collection('content_items').createIndex({ week: 1 });
         await db.collection('content_items').createIndex({ id: 1 }, { unique: true });
 
         // 5. Client Resources Collection

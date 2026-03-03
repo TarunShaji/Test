@@ -28,14 +28,32 @@ export async function GET(request) {
         const category = url.searchParams.get('category')
         const assignedTo = url.searchParams.get('assigned_to')
         const priority = url.searchParams.get('priority')
+        const search = url.searchParams.get('search')
+
+        // Pagination Params
+        const page = parseInt(url.searchParams.get('page')) || 1
+        const limit = parseInt(url.searchParams.get('limit')) || 50
+        const skip = (page - 1) * limit
 
         if (clientId) query.client_id = clientId
         if (status) query.status = status
         if (category) query.category = category
         if (assignedTo) query.assigned_to = assignedTo
         if (priority) query.priority = priority
+        if (search) {
+            query.title = { $regex: search, $options: 'i' }
+        }
 
-        const tasks = await database.collection('tasks').find(query).sort({ created_at: -1 }).toArray()
+        const collection = database.collection('tasks')
+        const total = await collection.countDocuments(query)
+        const totalPages = Math.ceil(total / limit)
+
+        const tasks = await collection.find(query)
+            .sort({ created_at: -1 })
+            .skip(skip)
+            .limit(limit)
+            .toArray()
+
         const cleanTasks = safeArray(tasks).map(({ _id, ...t }) => t)
 
         // Enrich with client names and assignee names
@@ -54,7 +72,12 @@ export async function GET(request) {
             assigned_to_name: memberMap[t.assigned_to] || null
         }))
 
-        return handleCORS(NextResponse.json(enriched))
+        return handleCORS(NextResponse.json({
+            data: enriched,
+            total,
+            page,
+            totalPages
+        }))
     })
 }
 
