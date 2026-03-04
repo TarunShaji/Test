@@ -38,8 +38,8 @@ import { CSS } from '@dnd-kit/utilities'
 import { restrictToHorizontalAxis, restrictToVerticalAxis } from '@dnd-kit/modifiers'
 import {
   STATUSES, CATEGORIES, PRIORITIES, APPROVALS, INTERNAL_APPROVALS, CONTENT_INTERNAL_APPROVALS, REPORT_TYPES, SERVICE_TYPES,
-  OUTLINE_STATUSES, TOPIC_APPROVALS, BLOG_APPROVALS, BLOG_STATUSES,
-  statusColors, priorityColors, approvalColors, topicApprovalColors, blogStatusColors, internalApprovalColors,
+  OUTLINE_STATUSES, TOPIC_APPROVALS, BLOG_APPROVALS, BLOG_STATUSES, INTERN_STATUSES,
+  statusColors, priorityColors, approvalColors, topicApprovalColors, blogStatusColors, internalApprovalColors, internStatusColors,
   TASK_COLUMN_WIDTHS, CONTENT_COLUMN_WIDTHS
 } from '@/lib/constants'
 
@@ -164,19 +164,21 @@ export default function ClientDetailPage() {
       setTaskColOrder(['selection', 'title', 'category', 'status', 'priority', 'eta', 'assigned', 'link', 'internal_approval', 'send_link', 'client_approval', 'client_feedback', 'actions'])
     }
 
-    // Always nuke the old v2 key so stale orders without blog_doc are gone
+    // Always nuke old stale orders
     localStorage.removeItem('client_content_col_order_v2')
+    localStorage.removeItem('client_content_col_order_v3')
 
-    const savedContent = localStorage.getItem('client_content_col_order_v3')
+    const savedContent = localStorage.getItem('client_content_col_order_v4')
     const parsedContent = safeJSON(savedContent)
-    const defaultContentCols = ['selection', 'week', 'title', 'keyword', 'writer', 'topic_approval', 'blog_status', 'blog_doc', 'blog_internal_approval', 'send_link', 'blog_approval', 'blog_feedback', 'link', 'published', 'comments', 'actions']
+    const defaultContentCols = [
+      'selection', 'week', 'title', 'primary_keyword', 'secondary_keyword', 'writer',
+      'outline', 'intern_status', 'search_volume',
+      'topic_approval', 'blog_status', 'blog_doc',
+      'blog_internal_approval', 'send_link', 'date_sent', 'blog_approval', 'approved_on', 'blog_feedback',
+      'link', 'required_by', 'published', 'comments', 'actions'
+    ]
     if (parsedContent && Array.isArray(parsedContent)) {
-      let cols = parsedContent.filter(c => c !== 'client' && c !== 'outline')
-      // Inject blog_doc before blog_internal_approval if not already present
-      if (!cols.includes('blog_doc')) {
-        const idx = cols.indexOf('blog_internal_approval')
-        cols = idx >= 0 ? [...cols.slice(0, idx), 'blog_doc', ...cols.slice(idx)] : [...cols, 'blog_doc']
-      }
+      const cols = parsedContent.filter(c => c !== 'client')
       setContentColOrder(cols.includes('selection') ? cols : ['selection', ...cols.filter(c => c !== 'selection')])
     } else {
       setContentColOrder(defaultContentCols)
@@ -751,9 +753,22 @@ export default function ClientDetailPage() {
               </div>
             )}
             {colId === 'title' && <EditableCell value={item.blog_title} onSave={v => updateContent(item.id, 'blog_title', v)} />}
-            {colId === 'keyword' && <EditableCell value={item.primary_keyword} onSave={v => updateContent(item.id, 'primary_keyword', v)} placeholder="keyword" />}
+            {colId === 'primary_keyword' && <EditableCell value={item.primary_keyword} onSave={v => updateContent(item.id, 'primary_keyword', v)} placeholder="Primary Keyword" />}
+            {colId === 'secondary_keyword' && <EditableCell value={item.secondary_keywords} onSave={v => updateContent(item.id, 'secondary_keywords', v)} placeholder="Secondary Keyword" />}
             {colId === 'writer' && <EditableCell value={item.writer} onSave={v => updateContent(item.id, 'writer', v)} placeholder="Writer" />}
-            {colId === 'outline' && <EditableCell value={item.outline_status} type="select" options={OUTLINE_STATUSES} onSave={v => updateContent(item.id, 'outline_status', v)} />}
+            {colId === 'search_volume' && <EditableCell value={item.search_volume != null ? String(item.search_volume) : ''} onSave={v => updateContent(item.id, 'search_volume', v ? parseInt(v.replace(/,/g, ''), 10) : null)} placeholder="Vol" />}
+            {colId === 'outline' && <LinkCell value={item.outline_link} onSave={v => updateContent(item.id, 'outline_link', v)} />}
+            {colId === 'intern_status' && (
+              <select
+                value={item.intern_status || ''}
+                onChange={e => updateContent(item.id, 'intern_status', e.target.value || null)}
+                className={`text-[10px] px-2 py-1 rounded-full border font-medium appearance-none cursor-pointer ${internStatusColors[item.intern_status] || 'bg-gray-50 text-gray-400 border-gray-200'}`}
+              >
+                <option value="">— None —</option>
+                {INTERN_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            )}
+            {colId === 'required_by' && <EditableCell value={item.required_by} type="date" onSave={v => updateContent(item.id, 'required_by', v)} />}
             {colId === 'topic_approval' && (
               <EditableCell
                 value={item.topic_approval_status || 'Pending'}
@@ -797,6 +812,9 @@ export default function ClientDetailPage() {
             {colId === 'blog_approval' && (
               <EditableCell value={item.blog_approval_status || 'Pending Review'} type="blog_approval" disabled={true} />
             )}
+            {colId === 'approved_on' && (
+              <span className="text-xs text-gray-500">{item.blog_approval_date || '—'}</span>
+            )}
             {colId === 'blog_feedback' && (
               <div className="max-w-[150px]">
                 {item.blog_approval_status === 'Changes Required' ? (
@@ -809,6 +827,9 @@ export default function ClientDetailPage() {
             {colId === 'blog_doc' && <LinkCell value={item.blog_doc_link} onSave={v => updateContent(item.id, 'blog_doc_link', v)} />}
             {colId === 'link' && <LinkCell value={item.blog_link} onSave={v => updateContent(item.id, 'blog_link', v)} />}
             {colId === 'published' && <EditableCell value={item.published_date} type="date" onSave={v => updateContent(item.id, 'published_date', v)} />}
+            {colId === 'date_sent' && (
+              <span className="text-xs text-gray-500">{item.date_sent_for_approval || '—'}</span>
+            )}
             {colId === 'comments' && <EditableCell value={item.comments} onSave={v => updateContent(item.id, 'comments', v)} placeholder="Notes..." />}
             {colId === 'actions' && (
               <button onClick={() => deleteContent(item.id)} className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-50 text-red-400 transition-all">
@@ -830,11 +851,15 @@ export default function ClientDetailPage() {
 
   const contentColLabels = {
     selection: '',
-    week: 'Week', title: 'Blog Title', keyword: 'Keyword', writer: 'Writer',
-    outline: 'Outline Status', topic_approval: 'Topic Approval', blog_status: 'Blog Status',
+    week: 'Week', title: 'Blog Title',
+    primary_keyword: 'Primary Keyword', secondary_keyword: 'Secondary Keyword',
+    writer: 'Writer', search_volume: 'Search Vol.', outline: 'Outline',
+    intern_status: 'Intern Status', required_by: 'Required By',
+    topic_approval: 'Topic Approval', blog_status: 'Blog Status',
     blog_doc: 'Blog Doc', blog_internal_approval: 'Internal Approval', send_link: 'Send Link',
-    blog_approval: 'Client Approval', blog_feedback: 'Feedback',
-    link: 'Live Link', published: 'Published', comments: 'Notes', actions: ''
+    date_sent: 'Sent For Appr.',
+    blog_approval: 'Client Approval', approved_on: 'Approved On', blog_feedback: 'Feedback',
+    link: 'Blog Link', published: 'Published', comments: 'Notes', actions: ''
   }
 
   return (

@@ -2,10 +2,12 @@
 
 This document provides a comprehensive end-to-end overview of how data flows from a spreadsheet paste to the database and finally to the user interface.
 
+---
+
 ## 1. Data Ingestion & Normalization
 
-### Pasta Mechanism
-When data is pasted from Google Sheets or Excel into the Dashboard, it is parsed into a raw JSON array. Before mapping, every value and header passes through `lib/import/normalize.js`.
+### Paste Mechanism
+When data is pasted from Google Sheets or Excel, it is parsed into a raw JSON array. Before mapping, every value and header passes through `lib/import/normalize.js`.
 
 | Step | Function | Purpose |
 |---|---|---|
@@ -19,20 +21,21 @@ When data is pasted from Google Sheets or Excel into the Dashboard, it is parsed
 ## 2. The Task Schema
 
 ### Mapping Context (`lib/import/task-mapping.js`)
-Keywords are used to find relevant columns in the sheet. If multiple columns match, the first match is used.
+Keywords are used to find relevant columns. The `findHeader` helper prioritizes **exact matches** before falling back to substring matches.
 
 | Field | Keywords | Type | Default / Logic |
 |---|---|---|---|
-| **title** (Req) | `task`, `name`, `to-do`, `deliverable` | String | Fallback to column 0 if no match. |
+| **title** (Req) | `task`, `name`, `to-do`, `deliverable`, `item` | String | Fallback to column 0 if no match. |
 | **status** | `status` | Enum | Mapped via `TASK_STATUS_MAP` (e.g., "WIP" → "In Progress"). |
-| **category** | `category`, `type`, `industry` | String | Defaults to "Other". |
-| **priority** | `priority` | Enum | Validates strictly for `P0`, `P1`, `P2`, `P3`. Defaults to `P2`. <br> *ClickUp CSV Mode:* URGENT→P0, HIGH→P1, NORMAL→P2, none→P3. |
-| **link_url** | `link`, `url`, `live link` | URL | Extracted and normalized. |
-| **assigned_to** | `assigned`, `owner`, `assignee` | String | Reference to team member name or ID. |
+| **category** | `category`, `type`, `group`, `service`, `industry` | String | Extracted as plain text. |
+| **priority** | `priority` | Enum | Defaults to `P2`. <br> *Normal:* Maps "Urgent/Critical"→P0, "High"→P1, "Medium"→P2, "Low"→P3. <br> *ClickUp CSV Mode:* URGENT→P0, HIGH→P1, NORMAL→P2, none→P3. |
+| **link_url** | `link`, `url`, `live link`, `page url` | URL | Extracted and normalized. |
 | **eta_end** | `eta`, `due`, `deadline`, `required by` | Date | Converted to `YYYY-MM-DD`. |
-| **remarks** | `remark`, `note`, `feedback` | String | Stored as text. |
 
-### Database Schema (`lib/schemas/task.schema.js`)
+> [!NOTE]
+> **assigned_to** is intentionally **not** mapped from spreadsheets. This field uses agency team member IDs and is managed exclusively via the Dashboard UI to ensure valid assignments.
+
+### Database Schema (`lib/db/schemas/task.schema.js`)
 Persisted in the `tasks` collection.
 ```javascript
 {
@@ -44,10 +47,9 @@ Persisted in the `tasks` collection.
   category: String,
   link_url: URL,
   assigned_to: String,
-  eta_start: DateString,
   eta_end: DateString,
-  remarks: String,
-  internal_approval: "Pending" | "Approved" | "Required Changes",
+  internal_approval: "Pending" | "Approved",
+  client_link_visible: Boolean,
   signature: SHA256 (Idempotency Key)
 }
 ```
@@ -57,51 +59,39 @@ Persisted in the `tasks` collection.
 ## 3. The Content Calendar Schema
 
 ### Mapping Context (`lib/import/content-mapping.js`)
-The content importer is strictly minimal. It only imports **Intent/Planning** fields. Workflow fields (Approval, Status) are managed exclusively in the Dashboard.
+The content importer focuses on **Planning & Metadata**. Workflow fields (Approval, Status) are managed exclusively in the Dashboard.
 
 | Field | Keywords | Mapping Constraint |
 |---|---|---|
-| **blog_title** (Req) | `title`, `topic`, `article` | Primary identifier. |
-| **week** | `week`, `wk` | String label. |
-| **blog_doc_link** | `blog doc`, `outline` | Draft URL (Google Doc). |
+| **blog_title** (Req) | `blog title`, `blog topic`, `title`, `topic` | Primary identifier. |
+| **week** | `week`, `wk` | String number (1-10). |
+| **primary_keyword** | `keyword`, `primary keyword` | Stored as plain text. |
+| **writer** | `writer`, `author` | Stored as plain text. |
+| **blog_doc_link** | `blog doc`, `blog document`, `blog` | Draft URL (Google Doc). |
 | **blog_link** | `blog link`, `live link` | Live published URL. |
+| **published_date** | `published`, `published date` | ISO `YYYY-MM-DD`. |
 
 > [!IMPORTANT]
-> Fields like `blog_status`, `internal_approval`, and `ai_score` are **ignored** during sheet import to prevent overriding the current production workflow state.
-
-### Database Schema (`lib/schemas/content.schema.js`)
-Persisted in the `content_items` collection.
-```javascript
-{
-  blog_title: String,
-  client_id: UUID,
-  week: String,
-  blog_status: "Draft" | "In Progress" | "Sent for Approval" | "Published",
-  topic_approval_status: "Pending" | "Approved" | "Rejected",
-  blog_internal_approval: "Pending" | "Approved",
-  blog_doc_link: URL (Google Doc),
-  blog_link: URL (Live),
-  client_link_visible_blog: Boolean
-}
-```
+> **Safety Logic for 'Blog' Header**: If a column named exactly "Blog" is found, the importer prioritizes it as the `blog_doc_link` (usually a doc link) rather than the `blog_title` to prevent mis-mapping.
 
 ---
 
-## 4. End-to-End Flow
+## 4. The Lifecycle Engine (`lib/engine/lifecycle.js`)
 
-### A. Ingestion (Client-side)
-1. User clicks **Import** and pastes spreadsheet data.
-2. `getMappedHeaders()` filters the view to show only recognized columns.
-3. User confirms preview.
+Before any data is written to the database (Initial Import or Edit), it must pass through the Lifecycle Engine. This ensures the dashboard remains in a "legal" state.
 
-### B. Persistence (Server-side)
-Endpoint: `/api/tasks/bulk` or `/api/content/bulk`
-1. **Validation**: Zod strips unknown fields.
-2. **Lifecycle Engine**: `applyTaskTransition(null, data)` is called. This injects system defaults (e.g., `status: "To Be Started"`) and ensures business rules are followed before the first write.
-3. **Idempotency**: A `signature` is generated from `client_id` + `title` + `eta`.
-4. **Bulk Write**: MongoDB `bulkWrite` with `upsert: true` ensures that re-importing the same sheet doesn't create duplicate tasks.
+### Core Invariants
+- **Visibility Guard**: `client_link_visible` cannot be `true` unless `internal_approval` is `Approved` AND the task/content is `Completed`/`Published`.
+- **Feedback Loop**: Transitioning `client_approval` to `Required Changes` automatically sets the status back to `In Progress` and hides the link from the client.
+- **Link Reset**: If the `link_url` or `blog_doc_link` is changed after being sent to the client, the system automatically resets the approval status to `Pending` to force a new QA pass.
 
-### C. Display (UI)
-1. Dashboard fetches data via `GET /api/tasks?client_id=...`.
-2. Data is rendered in `<TaskTable>` or `<ContentTable>`.
-3. **Logic Layer**: The UI uses the same `lifecycleEngine.js` rules to determine which buttons (like "Send Link" or "Approve") are enabled based on the current state.
+---
+
+## 5. End-to-End Persistence Flow
+
+1. **Ingestion**: User pastes data into `/dashboard/import`.
+2. **Preview**: `getMappedHeaders()` ensures only recognized columns are shown.
+3. **Drafting**: `rowToTask` or `rowToContent` transforms raw rows into schema-aligned objects.
+4. **Validation**: The backend API uses **Zod** (`lib/db/schemas`) to strip unknown fields and enforce types.
+5. **Logic**: The API calls `applyTaskTransition` or `applyContentTransition` (from the Lifecycle Engine) to inject defaults and apply business rules.
+6. **Upsert**: MongoDB `bulkWrite` uses a `signature` (SHA-256 of ClientID + Title + Date) to ensure that re-importing the same sheet updates existing items instead of creating duplicates.

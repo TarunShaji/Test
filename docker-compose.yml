@@ -1,0 +1,14 @@
+services:
+  nextjs:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Pass NEXT_PUBLIC_ vars at build time so they get baked into the bundle
+        - NEXT_PUBLIC_BASE_URL=${NEXT_PUBLIC_BASE_URL}
+    container_name: cubehq_dashboard
+    env_file:
+      - .env
+    ports:
+      - "3000:3000"
+    restart: unless-stopped

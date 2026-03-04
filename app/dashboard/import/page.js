@@ -352,12 +352,15 @@ function FormatGuide({ actionLabel }) {
             <li><span className="font-medium">Keyword / Primary Keyword / Primary Keywords</span></li>
             <li><span className="font-medium">Writer / Author</span></li>
             <li><span className="font-medium">Blog Doc / Blog Document / Blog</span></li>
-            <li><span className="font-medium">Blog Link / Link / Live Link / Published Link / Publishing Link</span></li>
+            <li><span className="font-medium">Blog Link / Link / Published Link / Publishing Link</span></li>
             <li><span className="font-medium">Published / Published Date / Date of Publication</span> → normalised to YYYY-MM-DD</li>
+            <li><span className="font-medium">Topic Approval / Topic Status</span> → Pending, Approved, Rejected</li>
+            <li><span className="font-medium">Blog Status</span> → Draft, In Progress, Sent, Published...</li>
+            <li><span className="font-medium">Internal Approval / Blog Internal Approval</span> → Pending, Approved</li>
           </ul>
         </div>
         <div className="bg-blue-50 border border-blue-100 rounded p-2 text-blue-700">
-          Topic Approval, Blog Status, Internal Approval, Send Link, Client Approval, and Feedback are <strong>not imported</strong> — managed via the dashboard.
+          Client Approval and Feedback are <strong>not imported</strong> — managed via the dashboard after sending links.
         </div>
         <div className="bg-amber-50 border border-amber-100 rounded p-2 text-amber-700">
           Rows are skipped only when the Blog Title column cannot be found.
@@ -628,6 +631,9 @@ const CONTENT_PREVIEW_COLS = [
   { field: 'blog_doc_link', label: 'Blog Doc' },
   { field: 'blog_link', label: 'Blog Link' },
   { field: 'published_date', label: 'Published' },
+  { field: 'topic_approval_status', label: 'Topic Appr.' },
+  { field: 'blog_status', label: 'Blog Status' },
+  { field: 'blog_internal_approval', label: 'Internal Appr.' },
 ]
 
 function ContentCSVImport({ clients }) {

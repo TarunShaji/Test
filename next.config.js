@@ -1,4 +1,7 @@
 const nextConfig = {
+  // Produces .next/standalone — a self-contained server.js for Docker
+  // This shrinks the final image from ~1GB → ~200MB
+  output: 'standalone',
   images: {
     unoptimized: true,
   },

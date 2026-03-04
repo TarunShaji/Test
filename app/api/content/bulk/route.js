@@ -19,6 +19,8 @@ const ContentImportItemSchema = z.object({
     secondary_keywords: z.string().optional().nullable(),
     blog_type: z.string().optional().nullable(),
     writer: z.string().optional().nullable(),
+    search_volume: z.number().int().nonnegative().optional().nullable(),
+    outline_link: z.string().optional().nullable(),
     outline_status: z.string().optional().nullable(),
     required_by: z.string().optional().nullable(),
     date_edited: z.string().optional().nullable(),
@@ -28,6 +30,9 @@ const ContentImportItemSchema = z.object({
     raw_submission_rating: z.string().optional().nullable(),
     ai_score: z.string().optional().nullable(),
     blog_status: z.string().optional().nullable(),
+    topic_approval_status: z.string().optional().nullable(),
+    blog_internal_approval: z.string().optional().nullable(),
+    intern_status: z.string().optional().nullable(),
     blog_doc_link: z.string().optional().nullable(),
     blog_link: z.string().optional().nullable(),
 })

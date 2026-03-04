@@ -36,15 +36,16 @@ import { restrictToHorizontalAxis, restrictToVerticalAxis } from '@dnd-kit/modif
 
 import {
   OUTLINE_STATUSES, TOPIC_APPROVALS, BLOG_APPROVALS, BLOG_STATUSES, CONTENT_INTERNAL_APPROVALS,
-  topicApprovalColors, blogStatusColors, approvalColors, CONTENT_COLUMN_WIDTHS
+  INTERN_STATUSES, topicApprovalColors, blogStatusColors, approvalColors, internStatusColors, CONTENT_COLUMN_WIDTHS
 } from '@/lib/constants'
 
-const COL_ORDER_KEY = 'content_column_order_v3'
+const COL_ORDER_KEY = 'content_column_order_v4'
 const DEFAULT_COL_ORDER = [
-  'client', 'week', 'title', 'keyword', 'writer',
+  'client', 'week', 'title', 'primary_keyword', 'secondary_keyword', 'writer',
+  'outline', 'intern_status', 'search_volume',
   'topic_approval', 'blog_status', 'blog_doc',
-  'blog_internal_approval', 'send_link', 'blog_approval', 'blog_feedback',
-  'link', 'published', 'actions'
+  'blog_internal_approval', 'send_link', 'date_sent', 'blog_approval', 'approved_on', 'blog_feedback',
+  'link', 'required_by', 'published', 'actions'
 ]
 
 function ContentCalendarContent() {
@@ -106,19 +107,14 @@ function ContentCalendarContent() {
   }, [localSearch])
 
   useEffect(() => {
-    // Nuke the old v2 key so stale orders are gone
+    // Bump to v4 to clear stale column orders
     localStorage.removeItem('content_column_order_v2')
+    localStorage.removeItem('content_column_order_v3')
 
     const saved = localStorage.getItem(COL_ORDER_KEY)
     const parsed = safeJSON(saved)
     if (parsed && Array.isArray(parsed)) {
-      let cols = [...parsed]
-      // Ensure blog_doc is present in any v3 save
-      if (!cols.includes('blog_doc')) {
-        const idx = cols.indexOf('blog_internal_approval')
-        cols = idx >= 0 ? [...cols.slice(0, idx), 'blog_doc', ...cols.slice(idx)] : [...cols, 'blog_doc']
-      }
-      setColumnOrder(cols)
+      setColumnOrder(parsed)
     } else {
       setColumnOrder(DEFAULT_COL_ORDER)
     }
@@ -222,12 +218,14 @@ function ContentCalendarContent() {
 
   const SortableHeader = ({ id, label }) => {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: id || 'header' })
+    const isSticky = id === 'title'
     const style = {
       transform: CSS.Transform.toString(transform),
       transition,
-      zIndex: isDragging ? 20 : 0,
+      zIndex: isDragging ? 20 : (isSticky ? 5 : 0),
       width: CONTENT_COLUMN_WIDTHS[id] || 'auto',
-      minWidth: CONTENT_COLUMN_WIDTHS[id] || 'auto'
+      minWidth: CONTENT_COLUMN_WIDTHS[id] || 'auto',
+      ...(isSticky ? { position: 'sticky', left: '55px', background: '#f9fafb' } : {})
     }
     return (
       <th ref={setNodeRef} style={style} className={`text-left px-3 py-2.5 font-semibold text-gray-600 bg-gray-50 border-r border-gray-100 last:border-0 ${isDragging ? 'opacity-50' : ''}`}>
@@ -241,85 +239,119 @@ function ContentCalendarContent() {
     )
   }
 
-  const SortableRow = ({ item }) => {
+  const SortableRow = ({ item, rowIndex }) => {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item?.id || 'unknown' })
     if (!item?.id) return null
     const style = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 20 : 0 }
     return (
       <tr ref={setNodeRef} style={style} className={`hover:bg-gray-50 group border-b border-gray-100 ${isDragging ? 'opacity-50 shadow-lg' : ''}`}>
-        {safeArray(columnOrder).map(colId => (
-          <td key={colId} className={`px-3 py-1.5 overflow-hidden ${colId === 'blog_internal_approval' || colId === 'send_link' ? 'bg-gray-50/50' : ''}`} style={{ width: CONTENT_COLUMN_WIDTHS[colId], minWidth: CONTENT_COLUMN_WIDTHS[colId] }}>
-            {colId === 'client' && (
-              <div className="flex items-center gap-2">
-                <div {...attributes} {...listeners} className="cursor-grab text-gray-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <GripVertical className="w-3 h-3" />
-                </div>
-                <Link href={`/dashboard/clients/${item?.client_id}`} className="text-xs text-blue-600 hover:underline font-medium">
-                  {clientMap[item?.client_id] || 'Unknown'}
-                </Link>
-              </div>
-            )}
-            {colId === 'week' && <EditableCell value={item.week} onSave={v => updateContent(item.id, 'week', v)} placeholder="Week" />}
-            {colId === 'title' && <EditableCell value={item.blog_title} onSave={v => updateContent(item.id, 'blog_title', v)} />}
-            {colId === 'keyword' && <EditableCell value={item.primary_keyword} onSave={v => updateContent(item.id, 'primary_keyword', v)} placeholder="keyword" />}
-            {colId === 'writer' && <EditableCell value={item.writer} onSave={v => updateContent(item.id, 'writer', v)} placeholder="Writer" />}
-            {colId === 'topic_approval' && <EditableCell value={item.topic_approval_status || 'Pending'} type="topic_approval" options={TOPIC_APPROVALS} onSave={v => updateContent(item.id, 'topic_approval_status', v)} />}
-            {colId === 'blog_status' && <EditableCell value={item.blog_status || 'Draft'} type="blog_status" options={BLOG_STATUSES} onSave={v => updateContent(item.id, 'blog_status', v)} />}
-            {colId === 'blog_internal_approval' && (
-              <EditableCell
-                value={item.blog_internal_approval || 'Pending'}
-                type="internal_approval"
-                options={CONTENT_INTERNAL_APPROVALS}
-                disabled={!item.blog_doc_link}
-                onSave={v => updateContent(item.id, 'blog_internal_approval', v)}
-              />
-            )}
-            {colId === 'send_link' && (
-              <Button
-                size="sm"
-                variant={item.client_link_visible_blog ? 'ghost' : 'default'}
-                className={`h-7 px-2 text-[10px] uppercase tracking-wider font-bold ${item.client_link_visible_blog ? 'text-green-600' : ''}`}
-                disabled={
-                  item.blog_internal_approval !== 'Approved' ||
-                  !item.blog_doc_link ||
-                  item.client_link_visible_blog === true
-                }
-                onClick={() => publishContent(item.id)}
-              >
-                {item.client_link_visible_blog ? 'Sent' : 'Send Link'}
-              </Button>
-            )}
-            {colId === 'blog_approval' && (
-              <EditableCell value={item.blog_approval_status || 'Pending Review'} type="blog_approval" options={BLOG_APPROVALS} disabled={true} />
-            )}
-            {colId === 'blog_feedback' && (
-              <div className="max-w-[160px]">
-                {item.blog_approval_status === 'Changes Required' ? (
-                  <div className="text-[10px] text-red-600 bg-red-50 p-1 rounded border border-red-100 line-clamp-2" title={item.blog_client_feedback_note}>
-                    {item.blog_client_feedback_note || 'Changes requested'}
+        {/* Serial number — always leftmost, not draggable */}
+        <td className="px-2 py-1.5 text-center text-gray-400 font-mono text-[11px] bg-gray-50/60 border-r border-gray-100 select-none"
+          style={{ width: CONTENT_COLUMN_WIDTHS.serial, minWidth: CONTENT_COLUMN_WIDTHS.serial, position: 'sticky', left: 0, background: '#f9fafb' }}>
+          {rowIndex + 1}
+        </td>
+        {safeArray(columnOrder).map(colId => {
+          const isSticky = colId === 'title'
+          const stickyStyle = isSticky ? { position: 'sticky', left: '55px', background: '#fff', boxShadow: '2px 0 4px rgba(0,0,0,0.04)' } : {}
+          return (
+            <td key={colId} className={`px-3 py-1.5 overflow-hidden ${colId === 'blog_internal_approval' || colId === 'send_link' ? 'bg-gray-50/50' : ''}`}
+              style={{ width: CONTENT_COLUMN_WIDTHS[colId], minWidth: CONTENT_COLUMN_WIDTHS[colId], ...stickyStyle }}>
+              {colId === 'client' && (
+                <div className="flex items-center gap-2">
+                  <div {...attributes} {...listeners} className="cursor-grab text-gray-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <GripVertical className="w-3 h-3" />
                   </div>
-                ) : <span className="text-gray-300 text-xs">—</span>}
-              </div>
-            )}
-            {colId === 'blog_doc' && <LinkCell value={item.blog_doc_link} onSave={v => updateContent(item.id, 'blog_doc_link', v)} />}
-            {colId === 'link' && <LinkCell value={item.blog_link} onSave={v => updateContent(item.id, 'blog_link', v)} />}
-            {colId === 'published' && <EditableCell value={item.published_date} type="date" onSave={v => updateContent(item.id, 'published_date', v)} />}
-            {colId === 'actions' && (
-              <button onClick={() => deleteContent(item.id)} className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-50 text-red-400 transition-all">
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </td>
-        ))}
+                  <Link href={`/dashboard/clients/${item?.client_id}`} className="text-xs text-blue-600 hover:underline font-medium">
+                    {clientMap[item?.client_id] || 'Unknown'}
+                  </Link>
+                </div>
+              )}
+              {colId === 'week' && <EditableCell value={item.week} onSave={v => updateContent(item.id, 'week', v)} placeholder="Week" />}
+              {colId === 'title' && <EditableCell value={item.blog_title} onSave={v => updateContent(item.id, 'blog_title', v)} />}
+              {colId === 'primary_keyword' && <EditableCell value={item.primary_keyword} onSave={v => updateContent(item.id, 'primary_keyword', v)} placeholder="Primary Keyword" />}
+              {colId === 'secondary_keyword' && <EditableCell value={item.secondary_keywords} onSave={v => updateContent(item.id, 'secondary_keywords', v)} placeholder="Secondary Keyword" />}
+              {colId === 'writer' && <EditableCell value={item.writer} onSave={v => updateContent(item.id, 'writer', v)} placeholder="Writer" />}
+              {colId === 'search_volume' && <EditableCell value={item.search_volume != null ? String(item.search_volume) : ''} onSave={v => updateContent(item.id, 'search_volume', v ? parseInt(v.replace(/,/g, ''), 10) : null)} placeholder="Vol" />}
+              {colId === 'outline' && <LinkCell value={item.outline_link} onSave={v => updateContent(item.id, 'outline_link', v)} />}
+              {colId === 'intern_status' && (
+                <select
+                  value={item.intern_status || ''}
+                  onChange={e => updateContent(item.id, 'intern_status', e.target.value || null)}
+                  className={`text-[10px] px-2 py-1 rounded-full border font-medium appearance-none cursor-pointer ${internStatusColors[item.intern_status] || 'bg-gray-50 text-gray-400 border-gray-200'}`}
+                >
+                  <option value="">— None —</option>
+                  {INTERN_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              )}
+              {colId === 'required_by' && <EditableCell value={item.required_by} type="date" onSave={v => updateContent(item.id, 'required_by', v)} />}
+              {colId === 'topic_approval' && <EditableCell value={item.topic_approval_status || 'Pending'} type="topic_approval" options={TOPIC_APPROVALS} onSave={v => updateContent(item.id, 'topic_approval_status', v)} />}
+              {colId === 'blog_status' && <EditableCell value={item.blog_status || 'Draft'} type="blog_status" options={BLOG_STATUSES} onSave={v => updateContent(item.id, 'blog_status', v)} />}
+              {colId === 'blog_internal_approval' && (
+                <EditableCell
+                  value={item.blog_internal_approval || 'Pending'}
+                  type="internal_approval"
+                  options={CONTENT_INTERNAL_APPROVALS}
+                  disabled={!item.blog_doc_link}
+                  onSave={v => updateContent(item.id, 'blog_internal_approval', v)}
+                />
+              )}
+              {colId === 'send_link' && (
+                <Button
+                  size="sm"
+                  variant={item.client_link_visible_blog ? 'ghost' : 'default'}
+                  className={`h-7 px-2 text-[10px] uppercase tracking-wider font-bold ${item.client_link_visible_blog ? 'text-green-600' : ''}`}
+                  disabled={
+                    item.blog_internal_approval !== 'Approved' ||
+                    !item.blog_doc_link ||
+                    item.client_link_visible_blog === true
+                  }
+                  onClick={() => publishContent(item.id)}
+                >
+                  {item.client_link_visible_blog ? 'Sent' : 'Send Link'}
+                </Button>
+              )}
+              {colId === 'blog_approval' && (
+                <EditableCell value={item.blog_approval_status || 'Pending Review'} type="blog_approval" options={BLOG_APPROVALS} disabled={true} />
+              )}
+              {colId === 'approved_on' && (
+                <span className="text-xs text-gray-500">{item.blog_approval_date || '—'}</span>
+              )}
+              {colId === 'blog_feedback' && (
+                <div className="max-w-[160px]">
+                  {item.blog_approval_status === 'Changes Required' ? (
+                    <div className="text-[10px] text-red-600 bg-red-50 p-1 rounded border border-red-100 line-clamp-2" title={item.blog_client_feedback_note}>
+                      {item.blog_client_feedback_note || 'Changes requested'}
+                    </div>
+                  ) : <span className="text-gray-300 text-xs">—</span>}
+                </div>
+              )}
+              {colId === 'blog_doc' && <LinkCell value={item.blog_doc_link} onSave={v => updateContent(item.id, 'blog_doc_link', v)} />}
+              {colId === 'link' && <LinkCell value={item.blog_link} onSave={v => updateContent(item.id, 'blog_link', v)} />}
+              {colId === 'published' && <EditableCell value={item.published_date} type="date" onSave={v => updateContent(item.id, 'published_date', v)} />}
+              {colId === 'date_sent' && (
+                <span className="text-xs text-gray-500">{item.date_sent_for_approval || '—'}</span>
+              )}
+              {colId === 'actions' && (
+                <button onClick={() => deleteContent(item.id)} className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-50 text-red-400 transition-all">
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </td>
+          )
+        })}
       </tr>
     )
   }
 
   const columnLabels = {
-    client: 'Client', week: 'Week', title: 'Blog Title', keyword: 'Keyword', writer: 'Writer',
+    client: 'Client', week: 'Week', title: 'Blog Title',
+    primary_keyword: 'Primary Keyword', secondary_keyword: 'Secondary Keyword',
+    writer: 'Writer', search_volume: 'Search Vol.', outline: 'Outline',
+    intern_status: 'Intern Status', required_by: 'Required By',
     topic_approval: 'Topic Approval', blog_status: 'Blog Status',
     blog_doc: 'Blog Doc', blog_internal_approval: 'Internal Approval', send_link: 'Send Link',
-    blog_approval: 'Client Approval', blog_feedback: 'Feedback',
+    date_sent: 'Sent For Appr.',
+    blog_approval: 'Client Approval', approved_on: 'Approved On', blog_feedback: 'Feedback',
     link: 'Blog Link', published: 'Published', actions: ''
   }
 
@@ -435,10 +467,15 @@ function ContentCalendarContent() {
       <div className="bg-white border border-gray-200 rounded-lg overflow-auto shadow-sm text-xs">
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleColDragEnd} modifiers={[restrictToHorizontalAxis]}>
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleRowDragEnd} modifiers={[restrictToVerticalAxis]}>
-            <table className="w-full text-sm" style={{ minWidth: '1700px', tableLayout: 'fixed' }}>
+            <table className="w-full text-sm" style={{ minWidth: '2500px', tableLayout: 'fixed' }}>
               <thead>
+                {/* Serial number fixed header */}
                 <SortableContext items={columnOrder} strategy={horizontalListSortingStrategy}>
                   <tr className="border-b border-gray-100 bg-gray-50/80 sticky top-0 z-10 text-xs">
+                    <th className="px-2 py-2.5 text-center text-gray-400 font-semibold bg-gray-50 border-r border-gray-100"
+                      style={{ width: CONTENT_COLUMN_WIDTHS.serial, minWidth: CONTENT_COLUMN_WIDTHS.serial, position: 'sticky', left: 0, zIndex: 15 }}>
+                      #
+                    </th>
                     {columnOrder.map(colId => (
                       <SortableHeader key={colId} id={colId} label={columnLabels[colId] || colId} />
                     ))}
@@ -457,7 +494,7 @@ function ContentCalendarContent() {
                   </tr>
                 ) : (
                   <SortableContext items={filtered.map(i => i?.id)} strategy={verticalListSortingStrategy}>
-                    {filtered.map(item => <SortableRow key={item.id} item={item} />)}
+                    {filtered.map((item, idx) => <SortableRow key={item.id} item={item} rowIndex={idx} />)}
                   </SortableContext>
                 )}
               </tbody>

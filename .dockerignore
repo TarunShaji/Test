@@ -1,0 +1,40 @@
+# Dependencies
+node_modules
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# Next.js build output (will be rebuilt inside Docker)
+.next
+!.next/static
+!.next/standalone
+
+# Environment files — never bake secrets into the image
+.env
+.env.local
+.env.*.local
+
+# Git
+.git
+.gitignore
+.github
+
+# Docker files themselves (no need to copy into container)
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Dev tooling & logs
+.eslintrc*
+.prettierrc*
+tests/
+scripts/
+logs/
+*.log
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
