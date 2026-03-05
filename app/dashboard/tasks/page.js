@@ -77,7 +77,7 @@ function TasksPageContent() {
     const saved = localStorage.getItem('tasks_column_order_v2')
     const parsed = safeJSON(saved)
     if (parsed) setColumnOrder(parsed)
-    else setColumnOrder(['selection', 'client', 'title', 'category', 'status', 'priority', 'eta', 'assigned', 'link', 'internal_approval', 'send_link', 'client_approval', 'client_feedback', 'actions'])
+    else setColumnOrder(['serial', 'selection', 'client', 'title', 'category', 'status', 'priority', 'eta', 'assigned', 'link', 'internal_approval', 'send_link', 'client_approval', 'client_feedback', 'actions'])
   }, [])
 
   const loadData = async () => {
@@ -217,16 +217,26 @@ function TasksPageContent() {
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   )
 
-  const handleRowDragEnd = (event) => {
+  const handleRowDragEnd = async (event) => {
     const { active, over } = event
     if (!over) return
     if (active.id !== over.id) {
-      setTasks((items) => {
-        const oldIndex = items.findIndex((t) => t.id === active.id)
-        const newIndex = items.findIndex((t) => t.id === over.id)
-        if (oldIndex === -1 || newIndex === -1) return items
-        return arrayMove(items, oldIndex, newIndex)
-      })
+      const oldIndex = allTasks.findIndex((t) => t.id === active.id)
+      const newIndex = allTasks.findIndex((t) => t.id === over.id)
+      if (oldIndex === -1 || newIndex === -1) return
+
+      const updated = arrayMove(allTasks, oldIndex, newIndex)
+      setTasks(updated)
+
+      try {
+        await apiFetch('/api/tasks/reorder', {
+          method: 'PUT',
+          body: JSON.stringify({ ids: updated.map(t => t.id) })
+        })
+      } catch (e) {
+        console.error('Failed to persist task order', e)
+        loadData()
+      }
     }
   }
 
@@ -246,12 +256,19 @@ function TasksPageContent() {
 
   const SortableHeader = ({ id, label, sortField: sField }) => {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: id || 'header' })
+    const isSticky = id === 'title' || id === 'serial' || id === 'selection' || id === 'client'
+    const leftPosMap = { serial: '0px', selection: '55px', client: '115px', title: '255px' }
     const style = {
       transform: CSS.Transform.toString(transform),
       transition,
-      zIndex: isDragging ? 20 : 0,
+      zIndex: isDragging ? 40 : (isSticky ? 30 : 10),
       width: TASK_COLUMN_WIDTHS[id] || 'auto',
-      minWidth: TASK_COLUMN_WIDTHS[id] || 'auto'
+      minWidth: TASK_COLUMN_WIDTHS[id] || 'auto',
+      position: isSticky ? 'sticky' : 'relative',
+      left: isSticky ? leftPosMap[id] : undefined,
+      background: isSticky ? '#f9fafb' : undefined,
+      boxShadow: id === 'title' ? '4px 0 8px -4px rgba(0,0,0,0.1)' : undefined,
+      borderRight: isSticky ? '1px solid #e5e7eb' : undefined
     }
     return (
       <th ref={setNodeRef} style={style} className={`text-left px-3 py-2.5 font-semibold text-gray-600 bg-gray-50 border-r border-gray-100 last:border-0 ${isDragging ? 'opacity-50' : ''}`}>
@@ -274,76 +291,98 @@ function TasksPageContent() {
 
     return (
       <tr ref={setNodeRef} style={style} className={`hover:bg-gray-50 group border-b border-gray-100 ${selected.includes(task?.id) ? 'bg-blue-50' : ''} ${isDragging ? 'opacity-50 shadow-lg' : ''}`}>
-        {safeArray(columnOrder).map(colId => (
-          <td key={colId} className={`px-3 py-1.5 overflow-hidden ${colId === 'internal_approval' || colId === 'send_link' ? 'bg-gray-50/50' : ''}`} style={{ width: TASK_COLUMN_WIDTHS[colId], minWidth: TASK_COLUMN_WIDTHS[colId] }}>
-            {colId === 'selection' && (
-              <div className="flex items-center gap-3 px-1">
-                <div {...attributes} {...listeners} className="cursor-grab text-gray-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <GripVertical className="w-3 h-3" />
+        {safeArray(columnOrder).map(colId => {
+          const isSticky = colId === 'title' || colId === 'serial' || colId === 'selection' || colId === 'client'
+          const leftPosMap = { serial: '0px', selection: '55px', client: '115px', title: '255px' }
+          const stickyStyle = isSticky ? {
+            position: 'sticky',
+            left: leftPosMap[colId],
+            background: selected.includes(task?.id) ? '#eff6ff' : '#fff',
+            zIndex: 20,
+            borderRight: '1px solid #f3f4f6',
+            boxShadow: colId === 'title' ? '4px 0 8px -4px rgba(0,0,0,0.1)' : ''
+          } : {}
+          return (
+            <td key={colId} className={`px-3 py-1.5 overflow-hidden ${!isSticky && (colId === 'internal_approval' || colId === 'send_link') ? 'bg-gray-50/50' : ''}`}
+              style={{ width: TASK_COLUMN_WIDTHS[colId], minWidth: TASK_COLUMN_WIDTHS[colId], ...stickyStyle }}>
+              {colId === 'serial' && (
+                <div className="text-[10px] font-mono text-gray-400 text-center select-none">
+                  {allTasks.findIndex(t => t.id === task.id) + 1}
                 </div>
-                <Checkbox checked={selected.includes(task.id)} onCheckedChange={() => toggleSelect(task.id)} />
-              </div>
-            )}
-            {colId === 'client' && <span className="text-xs font-medium text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded">{task.client_name || '?'}</span>}
-            {colId === 'title' && <EditableCell value={task.title} onSave={v => updateTask(task.id, 'title', v)} />}
-            {colId === 'category' && <EditableCell value={task.category} type="select" options={CATEGORIES} onSave={v => updateTask(task.id, 'category', v)} />}
-            {colId === 'status' && <EditableCell value={task.status} type="status" options={STATUSES} onSave={v => updateTask(task.id, 'status', v)} />}
-            {colId === 'priority' && <EditableCell value={task.priority} type="priority" options={PRIORITIES} onSave={v => updateTask(task.id, 'priority', v)} />}
-            {colId === 'eta' && <EditableCell value={task.eta_end} type="date" onSave={v => updateTask(task.id, 'eta_end', v)} />}
-            {colId === 'assigned' && (
-              <EditableCell
-                value={memberMap[task.assigned_to] || ''}
-                type="select"
-                options={members.map(m => m.name)}
-                onSave={v => {
-                  const member = members.find(m => m.name === v)
-                  updateTask(task.id, 'assigned_to', member?.id || null)
-                }}
-              />
-            )}
-            {colId === 'link' && <LinkCell value={task.link_url} onSave={v => updateTask(task.id, 'link_url', v)} />}
-            {colId === 'internal_approval' && (
-              <EditableCell
-                value={task.internal_approval || 'Pending'}
-                type="internal_approval"
-                options={INTERNAL_APPROVALS}
-                disabled={task.status !== 'Completed'}
-                onSave={v => updateTask(task.id, 'internal_approval', v)}
-              />
-            )}
-            {colId === 'send_link' && (
-              <Button
-                size="sm"
-                variant={task.client_link_visible ? "ghost" : "default"}
-                className={`h-7 px-2 text-[10px] uppercase tracking-wider font-bold ${task.client_link_visible ? 'text-green-600' : ''}`}
-                disabled={
-                  task.status !== 'Completed' ||
-                  task.internal_approval !== 'Approved' ||
-                  !task.link_url ||
-                  task.client_link_visible === true
-                }
-                onClick={() => publishTask(task.id)}
-              >
-                {task.client_link_visible ? 'Sent' : 'Send Link'}
-              </Button>
-            )}
-            {colId === 'client_approval' && <EditableCell value={task.client_approval} type="approval" disabled={true} />}
-            {colId === 'client_feedback' && (
-              <div className="max-w-[150px]">
-                {task.client_approval === 'Required Changes' ? (
-                  <div className="text-[10px] text-red-600 bg-red-50 p-1 rounded border border-red-100 line-clamp-2" title={task.client_feedback_note}>
-                    {task.client_feedback_note}
+              )}
+              {colId === 'selection' && (
+                <div className="flex items-center gap-3 px-1">
+                  <div {...attributes} {...listeners} className="cursor-grab text-gray-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <GripVertical className="w-3 h-3" />
                   </div>
-                ) : <span className="text-gray-300 text-xs">—</span>}
-              </div>
-            )}
-            {colId === 'actions' && (
-              <button onClick={() => deleteTask(task?.id)} className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-50 text-red-400 transition-all">
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </td>
-        ))}
+                  <Checkbox checked={selected.includes(task.id)} onCheckedChange={() => toggleSelect(task.id)} />
+                </div>
+              )}
+              {colId === 'client' && (
+                <span className="text-xs font-medium text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded whitespace-nowrap">
+                  {clients.find(c => c.id === task.client_id)?.name || task.client_name || '?'}
+                </span>
+              )}
+              {colId === 'title' && <EditableCell value={task.title} onSave={v => updateTask(task.id, 'title', v)} />}
+              {colId === 'category' && <EditableCell value={task.category} type="select" options={CATEGORIES} onSave={v => updateTask(task.id, 'category', v)} />}
+              {colId === 'status' && <EditableCell value={task.status} type="status" options={STATUSES} onSave={v => updateTask(task.id, 'status', v)} />}
+              {colId === 'priority' && <EditableCell value={task.priority} type="priority" options={PRIORITIES} onSave={v => updateTask(task.id, 'priority', v)} />}
+              {colId === 'eta' && <EditableCell value={task.eta_end} type="date" onSave={v => updateTask(task.id, 'eta_end', v)} />}
+              {colId === 'assigned' && (
+                <EditableCell
+                  value={memberMap[task.assigned_to] || ''}
+                  type="select"
+                  options={members.map(m => m.name)}
+                  onSave={v => {
+                    const member = members.find(m => m.name === v)
+                    updateTask(task.id, 'assigned_to', member?.id || null)
+                  }}
+                />
+              )}
+              {colId === 'link' && <LinkCell value={task.link_url} onSave={v => updateTask(task.id, 'link_url', v)} />}
+              {colId === 'internal_approval' && (
+                <EditableCell
+                  value={task.internal_approval || 'Pending'}
+                  type="internal_approval"
+                  options={INTERNAL_APPROVALS}
+                  disabled={task.status !== 'Completed'}
+                  onSave={v => updateTask(task.id, 'internal_approval', v)}
+                />
+              )}
+              {colId === 'send_link' && (
+                <Button
+                  size="sm"
+                  variant={task.client_link_visible ? "ghost" : "default"}
+                  className={`h-7 px-2 text-[10px] uppercase tracking-wider font-bold ${task.client_link_visible ? 'text-green-600' : ''}`}
+                  disabled={
+                    task.status !== 'Completed' ||
+                    task.internal_approval !== 'Approved' ||
+                    !task.link_url ||
+                    task.client_link_visible === true
+                  }
+                  onClick={() => publishTask(task.id)}
+                >
+                  {task.client_link_visible ? 'Sent' : 'Send Link'}
+                </Button>
+              )}
+              {colId === 'client_approval' && <EditableCell value={task.client_approval} type="approval" disabled={true} />}
+              {colId === 'client_feedback' && (
+                <div className="max-w-[150px]">
+                  {task.client_approval === 'Required Changes' ? (
+                    <div className="text-[10px] text-red-600 bg-red-50 p-1 rounded border border-red-100 line-clamp-2" title={task.client_feedback_note}>
+                      {task.client_feedback_note}
+                    </div>
+                  ) : <span className="text-gray-300 text-xs">—</span>}
+                </div>
+              )}
+              {colId === 'actions' && (
+                <button onClick={() => deleteTask(task?.id)} className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-50 text-red-400 transition-all">
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </td>
+          );
+        })}
       </tr>
     )
   }
@@ -372,6 +411,45 @@ function TasksPageContent() {
         activeId={filterClient}
         onSelect={(id) => updateQueryParams({ client_id: id })}
       />
+
+      <div className="flex flex-wrap items-center gap-3 mb-4 p-4 bg-blue-50/50 border border-blue-100 rounded-lg shadow-sm">
+        <div className="flex-1 min-w-[200px]">
+          <h3 className="text-xs font-bold text-blue-800 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+            <Plus className="w-3.5 h-3.5" /> Quick Add Task
+          </h3>
+          <div className="flex gap-2">
+            <Select
+              value={newTask.client_id || '__none__'}
+              onValueChange={v => setNewTask(n => ({ ...n, client_id: v === '__none__' ? '' : v }))}
+            >
+              <SelectTrigger className="h-9 text-xs w-48 bg-white border-blue-200">
+                <SelectValue placeholder="Target Client..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__" className="text-xs text-gray-400">Select client…</SelectItem>
+                {safeArray(clients).map(c => <SelectItem key={c?.id} value={c?.id} className="text-xs">{c?.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <div className="relative flex-1">
+              <input
+                type="text" value={newTask.title}
+                onChange={e => setNewTask(n => ({ ...n, title: e.target.value }))}
+                onKeyDown={e => e.key === 'Enter' && addTask()}
+                placeholder="What needs to be done?"
+                className="w-full h-9 text-xs px-3 py-1 bg-white border border-blue-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-400/20 focus:border-blue-400 transition-all"
+                disabled={addingTask}
+              />
+            </div>
+            <Button
+              onClick={addTask}
+              disabled={addingTask || !newTask.title.trim() || !newTask.client_id || newTask.client_id === '__none__'}
+              className="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-sm transition-all"
+            >
+              {addingTask ? 'Saving...' : 'Add Task'}
+            </Button>
+          </div>
+        </div>
+      </div>
 
       <div className="flex flex-wrap gap-2 mb-4 p-3 bg-white border border-gray-200 rounded-lg">
         <div className="relative">
@@ -465,37 +543,6 @@ function TasksPageContent() {
                   </SortableContext>
                 )}
 
-                <tr className="bg-gray-50/30 border-t border-dashed border-gray-200">
-                  <td className="px-3 py-2"></td>
-                  <td className="px-3 py-2" colSpan={2}>
-                    <Select value={newTask.client_id || '__none__'} onValueChange={v => setNewTask(n => ({ ...n, client_id: v === '__none__' ? '' : v }))}>
-                      <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Client" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none__" className="text-xs text-gray-400">Select client…</SelectItem>
-                        {safeArray(clients).map(c => <SelectItem key={c?.id} value={c?.id} className="text-xs">{c?.name}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </td>
-                  <td className="px-3 py-2" colSpan={3}>
-                    <input
-                      type="text" value={newTask.title}
-                      onChange={e => setNewTask(n => ({ ...n, title: e.target.value }))}
-                      onKeyDown={e => e.key === 'Enter' && addTask()}
-                      placeholder="+ Add a task..."
-                      className="w-full text-xs px-2 py-1 bg-transparent border border-dashed border-gray-300 rounded focus:outline-none focus:border-blue-400 focus:bg-white"
-                      disabled={addingTask}
-                    />
-                  </td>
-                  <td colSpan={columnOrder.length - 6} className="px-3 py-2 text-right">
-                    <Button
-                      size="sm" variant="ghost" onClick={addTask}
-                      disabled={addingTask || !newTask.title.trim() || !newTask.client_id || newTask.client_id === '__none__'}
-                      className="text-xs h-7"
-                    >
-                      <Plus className="w-3 h-3 mr-1" />{addingTask ? 'Adding...' : 'Add'}
-                    </Button>
-                  </td>
-                </tr>
               </tbody>
             </table>
           </DndContext>

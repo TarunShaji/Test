@@ -36,7 +36,13 @@ export async function GET(request) {
         const skip = (page - 1) * limit
 
         if (clientId) query.client_id = clientId
-        if (status) query.status = status
+        if (status) {
+            if (status === 'not_completed') {
+                query.status = { $ne: 'Completed' }
+            } else {
+                query.status = status
+            }
+        }
         if (category) query.category = category
         if (assignedTo) query.assigned_to = assignedTo
         if (priority) query.priority = priority
@@ -49,7 +55,7 @@ export async function GET(request) {
         const totalPages = Math.ceil(total / limit)
 
         const tasks = await collection.find(query)
-            .sort({ created_at: -1 })
+            .sort({ position: 1, created_at: -1 })
             .skip(skip)
             .limit(limit)
             .toArray()

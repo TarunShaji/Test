@@ -58,7 +58,7 @@ export async function GET(request) {
         const statsMap = Object.fromEntries(stats.map(s => [s._id, s.count]))
 
         const content = await collection.find(query)
-            .sort({ created_at: -1 })
+            .sort({ position: 1, created_at: -1 })
             .skip(skip)
             .limit(limit)
             .toArray()

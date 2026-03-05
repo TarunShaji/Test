@@ -84,6 +84,8 @@ function ContentCalendarContent() {
   const [localSearch, setLocalSearch] = useState(filterSearch)
   const [showFilters, setShowFilters] = useState(true)
   const [columnOrder, setColumnOrder] = useState([])
+  const [newContent, setNewContent] = useState({ blog_title: '', client_id: '' })
+  const [addingContent, setAddingContent] = useState(false)
   const [confirmConfig, setConfirmConfig] = useState(null)
 
   const updateQueryParams = (updates) => {
@@ -145,6 +147,27 @@ function ContentCalendarContent() {
     setSaving(s => ({ ...s, [contentId]: false }))
   }
 
+  const addContent = async () => {
+    if (!newContent.blog_title.trim() || !newContent.client_id) return
+    setAddingContent(true)
+    try {
+      const res = await apiFetch('/api/content', {
+        method: 'POST',
+        body: JSON.stringify(newContent)
+      })
+      if (res.ok) {
+        setNewContent({ blog_title: '', client_id: '' })
+        mutateContent()
+      } else {
+        const error = await res.json()
+        alert(error.error || 'Failed to add content')
+      }
+    } catch (e) {
+      console.error('Add content failed', e)
+    }
+    setAddingContent(false)
+  }
+
   const publishContent = async (contentId) => {
     const item = content.find(c => c?.id === contentId)
     setSaving(s => ({ ...s, [contentId]: true }))
@@ -190,15 +213,26 @@ function ContentCalendarContent() {
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   )
 
-  const handleRowDragEnd = (event) => {
+  const handleRowDragEnd = async (event) => {
     const { active, over } = event
     if (!over) return
     if (active.id !== over.id) {
       const oldIndex = content.findIndex((c) => c.id === active.id)
       const newIndex = content.findIndex((c) => c.id === over.id)
       if (oldIndex === -1 || newIndex === -1) return
+
       const reordered = arrayMove(content, oldIndex, newIndex)
-      mutateContent(reordered, false)
+      mutateContent({ ...contentResponse, data: reordered }, false)
+
+      try {
+        await apiFetch('/api/content/reorder', {
+          method: 'PUT',
+          body: JSON.stringify({ ids: reordered.map(c => c.id) })
+        })
+      } catch (e) {
+        console.error('Failed to persist content order', e)
+        mutateContent()
+      }
     }
   }
 
@@ -222,10 +256,10 @@ function ContentCalendarContent() {
     const style = {
       transform: CSS.Transform.toString(transform),
       transition,
-      zIndex: isDragging ? 20 : (isSticky ? 5 : 0),
+      zIndex: isDragging ? 30 : (isSticky ? 20 : 0),
       width: CONTENT_COLUMN_WIDTHS[id] || 'auto',
       minWidth: CONTENT_COLUMN_WIDTHS[id] || 'auto',
-      ...(isSticky ? { position: 'sticky', left: '55px', background: '#f9fafb' } : {})
+      ...(isSticky ? { position: 'sticky', left: '55px', background: '#fff', borderRight: '1px solid #f3f4f6' } : {})
     }
     return (
       <th ref={setNodeRef} style={style} className={`text-left px-3 py-2.5 font-semibold text-gray-600 bg-gray-50 border-r border-gray-100 last:border-0 ${isDragging ? 'opacity-50' : ''}`}>
@@ -246,13 +280,13 @@ function ContentCalendarContent() {
     return (
       <tr ref={setNodeRef} style={style} className={`hover:bg-gray-50 group border-b border-gray-100 ${isDragging ? 'opacity-50 shadow-lg' : ''}`}>
         {/* Serial number — always leftmost, not draggable */}
-        <td className="px-2 py-1.5 text-center text-gray-400 font-mono text-[11px] bg-gray-50/60 border-r border-gray-100 select-none"
-          style={{ width: CONTENT_COLUMN_WIDTHS.serial, minWidth: CONTENT_COLUMN_WIDTHS.serial, position: 'sticky', left: 0, background: '#f9fafb' }}>
+        <td className="px-2 py-1.5 text-center text-gray-400 font-mono text-[11px] bg-white border-r border-gray-100 select-none"
+          style={{ width: CONTENT_COLUMN_WIDTHS.serial, minWidth: CONTENT_COLUMN_WIDTHS.serial, position: 'sticky', left: 0, background: '#fff', zIndex: 20 }}>
           {rowIndex + 1}
         </td>
         {safeArray(columnOrder).map(colId => {
           const isSticky = colId === 'title'
-          const stickyStyle = isSticky ? { position: 'sticky', left: '55px', background: '#fff', boxShadow: '2px 0 4px rgba(0,0,0,0.04)' } : {}
+          const stickyStyle = isSticky ? { position: 'sticky', left: '55px', background: '#fff', zIndex: 20, borderRight: '1px solid #f3f4f6', boxShadow: '4px 0 8px -4px rgba(0,0,0,0.1)' } : {}
           return (
             <td key={colId} className={`px-3 py-1.5 overflow-hidden ${colId === 'blog_internal_approval' || colId === 'send_link' ? 'bg-gray-50/50' : ''}`}
               style={{ width: CONTENT_COLUMN_WIDTHS[colId], minWidth: CONTENT_COLUMN_WIDTHS[colId], ...stickyStyle }}>
@@ -262,7 +296,7 @@ function ContentCalendarContent() {
                     <GripVertical className="w-3 h-3" />
                   </div>
                   <Link href={`/dashboard/clients/${item?.client_id}`} className="text-xs text-blue-600 hover:underline font-medium">
-                    {clientMap[item?.client_id] || 'Unknown'}
+                    {clients.find(c => c.id === item?.client_id)?.name || clientMap[item?.client_id] || 'Unknown'}
                   </Link>
                 </div>
               )}
@@ -391,6 +425,45 @@ function ContentCalendarContent() {
         activeId={filterClient}
         onSelect={(id) => updateQueryParams({ client_id: id })}
       />
+
+      <div className="flex flex-wrap items-center gap-3 mb-4 p-4 bg-blue-50/50 border border-blue-100 rounded-lg shadow-sm">
+        <div className="flex-1 min-w-[200px]">
+          <h3 className="text-xs font-bold text-blue-800 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+            <Plus className="w-3.5 h-3.5" /> Quick Add Content
+          </h3>
+          <div className="flex gap-2">
+            <Select
+              value={newContent.client_id || '__none__'}
+              onValueChange={v => setNewContent(n => ({ ...n, client_id: v === '__none__' ? '' : v }))}
+            >
+              <SelectTrigger className="h-9 text-xs w-48 bg-white border-blue-200">
+                <SelectValue placeholder="Target Client..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__" className="text-xs text-gray-400">Select client…</SelectItem>
+                {safeArray(clients).map(c => <SelectItem key={c?.id} value={c?.id} className="text-xs">{c?.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <div className="relative flex-1">
+              <input
+                type="text" value={newContent.blog_title}
+                onChange={e => setNewContent(n => ({ ...n, blog_title: e.target.value }))}
+                onKeyDown={e => e.key === 'Enter' && addContent()}
+                placeholder="Topic / Blog Title..."
+                className="w-full h-9 text-xs px-3 py-1 bg-white border border-blue-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-400/20 focus:border-blue-400 transition-all font-medium"
+                disabled={addingContent}
+              />
+            </div>
+            <Button
+              onClick={addContent}
+              disabled={addingContent || !newContent.blog_title.trim() || !newContent.client_id || newContent.client_id === '__none__'}
+              className="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-sm transition-all"
+            >
+              {addingContent ? 'Saving...' : 'Add Content'}
+            </Button>
+          </div>
+        </div>
+      </div>
 
       <div className="flex flex-wrap gap-2 mb-4 p-3 bg-white border border-gray-200 rounded-lg items-center">
         <div className="relative">

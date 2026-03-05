@@ -24,12 +24,22 @@ function parseSpreadsheet(text) {
     let cur = '', inQ = false
     for (let i = 0; i < raw.length; i++) {
       const ch = raw[i]
-      if (ch === '"') inQ = !inQ
+      if (ch === '"') {
+        // Handle escaped quotes: if we are in a quote and the next char is also a quote, keep both and stay inQ
+        if (inQ && raw[i + 1] === '"') {
+          cur += '""'
+          i++
+          continue
+        }
+        inQ = !inQ
+      }
       if ((ch === '\n' || (ch === '\r' && raw[i + 1] === '\n')) && !inQ) {
         if (ch === '\r') i++
-        if (cur.trim()) lines.push(cur)
+        lines.push(cur)
         cur = ''
-      } else { cur += ch }
+      } else {
+        cur += ch
+      }
     }
     if (cur.trim()) lines.push(cur)
     return lines
@@ -208,38 +218,33 @@ function ImportShell({
                 onChange={e => setRawData(e.target.value)}
                 onPaste={e => {
                   const html = e.clipboardData.getData('text/html')
-                  if (!html || !html.includes('<a ')) return
+                  if (!html || !html.includes('<table')) return
 
                   e.preventDefault()
                   try {
                     const parser = new DOMParser()
                     const doc = parser.parseFromString(html, 'text/html')
                     const table = doc.querySelector('table')
-                    if (!table) {
-                      // Just plain HTML with links, manually fallback or use text
-                      const text = e.clipboardData.getData('text/plain')
-                      setRawData(text)
-                      return
-                    }
+                    if (!table) return
 
                     const rows = Array.from(table.querySelectorAll('tr'))
                     const tsv = rows.map(tr => {
                       const cells = Array.from(tr.querySelectorAll('td, th'))
                       return cells.map(td => {
+                        let val = (td.innerText || td.textContent || '').trim()
                         const link = td.querySelector('a')
-                        const text = (td.innerText || td.textContent || '').trim()
-                        // If the cell is a hyperlink, prefer the href URL directly.
-                        // This makes the URL visible and clickable in the textarea.
-                        // The import mapping still extracts URLs via regex as a fallback.
                         if (link && link.href && link.href.startsWith('http')) {
-                          return link.href
+                          val = link.href
                         }
-                        return text
+                        // If cell contains a tab or newline, wrap it in quotes and escape internal quotes
+                        if (val.includes('\t') || val.includes('\n') || val.includes('"')) {
+                          val = `"${val.replace(/"/g, '""')}"`
+                        }
+                        return val
                       }).join('\t')
                     }).join('\n')
 
                     setRawData(tsv)
-                    // Trigger parse immediately. Pass tsv directly to avoid stale state from setRawData
                     setTimeout(() => onParse(tsv), 10)
                   } catch (err) {
                     console.error('Paste intercept failed', err)

@@ -552,12 +552,24 @@ export default function ClientDetailPage() {
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   )
 
-  const handleTaskRowDragEnd = (event) => {
+  const handleTaskRowDragEnd = async (event) => {
     const { active, over } = event
+    if (!over) return
     if (active.id !== over.id) {
       const oldIndex = allTasks.findIndex((t) => t.id === active.id)
       const newIndex = allTasks.findIndex((t) => t.id === over.id)
-      mutateTasks(arrayMove(allTasks, oldIndex, newIndex), false)
+      const reordered = arrayMove(allTasks, oldIndex, newIndex)
+      mutateTasks({ ...tasks, data: reordered }, false)
+
+      try {
+        await apiFetch('/api/tasks/reorder', {
+          method: 'PUT',
+          body: JSON.stringify({ ids: reordered.map(t => t.id) })
+        })
+      } catch (e) {
+        console.error('Failed to persist task order', e)
+        mutateTasks()
+      }
     }
   }
 
@@ -574,12 +586,24 @@ export default function ClientDetailPage() {
     }
   }
 
-  const handleContentRowDragEnd = (event) => {
+  const handleContentRowDragEnd = async (event) => {
     const { active, over } = event
+    if (!over) return
     if (active.id !== over.id) {
       const oldIndex = allContent.findIndex((c) => c.id === active.id)
       const newIndex = allContent.findIndex((c) => c.id === over.id)
-      mutateContent(arrayMove(allContent, oldIndex, newIndex), false)
+      const reordered = arrayMove(allContent, oldIndex, newIndex)
+      mutateContent({ ...content, data: reordered }, false)
+
+      try {
+        await apiFetch('/api/content/reorder', {
+          method: 'PUT',
+          body: JSON.stringify({ ids: reordered.map(c => c.id) })
+        })
+      } catch (e) {
+        console.error('Failed to persist content order', e)
+        mutateContent()
+      }
     }
   }
 
@@ -603,12 +627,22 @@ export default function ClientDetailPage() {
   const SortableHeader = ({ id, label, sortField: sField, handleSort, type = 'task' }) => {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: id || 'header' })
     const widths = type === 'task' ? TASK_COLUMN_WIDTHS : CONTENT_COLUMN_WIDTHS
+    const isContent = type === 'content'
+    const isSticky = (isContent && (id === 'title' || id === 'week' || id === 'serial')) || (!isContent && (id === 'title' || id === 'serial' || id === 'selection'))
+
+    // For Content: Serial(0), Week(40), Title(120)
+    // For Tasks: Serial(0), Selection(40), Title(100)
+    const leftPos = isContent
+      ? (id === 'serial' ? '0px' : id === 'week' ? '40px' : '120px')
+      : (id === 'serial' ? '0px' : id === 'selection' ? '40px' : '100px')
+
     const style = {
       transform: CSS.Transform.toString(transform),
       transition,
-      zIndex: isDragging ? 20 : 0,
+      zIndex: isDragging ? 30 : (isSticky ? 20 : 0),
       width: widths[id] || 'auto',
-      minWidth: widths[id] || 'auto'
+      minWidth: widths[id] || 'auto',
+      ...(isSticky ? { position: 'sticky', left: leftPos, background: '#f9fafb', borderRight: '1px solid #f3f4f6', boxShadow: id === 'title' ? '4px 0 8px -4px rgba(0,0,0,0.1)' : '' } : {})
     }
 
     const isTask = type === 'task'
@@ -640,88 +674,106 @@ export default function ClientDetailPage() {
   const TaskSortableRow = ({ task }) => {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task?.id || 'unknown' })
     if (!task?.id) return null
-    const style = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 20 : 0 }
+    const style = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 40 : 10 }
+
     return (
       <tr ref={setNodeRef} style={style} className={`hover:bg-gray-50 group border-b border-gray-100 ${isDragging ? 'opacity-50 shadow-lg' : ''}`}>
-        {safeArray(taskColOrder).map(colId => (
-          <td key={colId} className={`px-3 py-1.5 overflow-hidden ${colId === 'internal_approval' || colId === 'send_link' ? 'bg-gray-50/50' : ''}`} style={{ width: TASK_COLUMN_WIDTHS[colId], minWidth: TASK_COLUMN_WIDTHS[colId] }}>
-            {colId === 'selection' && (
-              <div className="flex items-center justify-center">
-                <input
-                  type="checkbox"
-                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                  checked={selectedTasks.has(task.id)}
-                  onChange={() => toggleTaskSelection(task.id)}
-                />
-              </div>
-            )}
-            {colId === 'title' && (
-              <div className="flex items-center gap-2">
-                <div {...attributes} {...listeners} className="cursor-grab text-gray-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                  <GripVertical className="w-3 h-3" />
+        <td className="px-2 py-1.5 text-center text-gray-400 font-mono text-[11px] bg-gray-50/50 border-r border-gray-100 select-none"
+          style={{ width: '40px', minWidth: '40px', position: 'sticky', left: 0, zIndex: 20 }}>
+          {allTasks.findIndex(t => t.id === task.id) + 1}
+        </td>
+        {safeArray(taskColOrder).map(colId => {
+          const isTaskSticky = colId === 'title' || colId === 'selection'
+          const taskLeftPos = colId === 'selection' ? '40px' : '100px'
+          const taskStickyStyle = isTaskSticky ? {
+            position: 'sticky',
+            left: taskLeftPos,
+            background: '#fff',
+            zIndex: 20,
+            borderRight: '1px solid #f3f4f6',
+            boxShadow: colId === 'title' ? '4px 0 8px -4px rgba(0,0,0,0.1)' : ''
+          } : {}
+          return (
+            <td key={colId} className={`px-3 py-1.5 overflow-hidden ${!isTaskSticky && (colId === 'internal_approval' || colId === 'send_link') ? 'bg-gray-50/50' : ''}`}
+              style={{ width: TASK_COLUMN_WIDTHS[colId], minWidth: TASK_COLUMN_WIDTHS[colId], ...taskStickyStyle }}>
+              {colId === 'selection' && (
+                <div className="flex items-center justify-center">
+                  <input
+                    type="checkbox"
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
+                    checked={selectedTasks.has(task.id)}
+                    onChange={() => toggleTaskSelection(task.id)}
+                  />
                 </div>
-                {saving[task.id] && <div className="w-1 h-1 rounded-full bg-blue-400 animate-pulse flex-shrink-0" />}
-                <EditableCell value={task.title} onSave={v => updateTask(task.id, 'title', v)} />
-              </div>
-            )}
-            {colId === 'category' && <EditableCell value={task.category} type="select" options={CATEGORIES} onSave={v => updateTask(task.id, 'category', v)} />}
-            {colId === 'status' && <EditableCell value={task.status} type="status" options={STATUSES} onSave={v => updateTask(task.id, 'status', v)} />}
-            {colId === 'priority' && <EditableCell value={task.priority} type="priority" options={PRIORITIES} onSave={v => updateTask(task.id, 'priority', v)} />}
-            {colId === 'eta' && <EditableCell value={task.eta_end} type="date" onSave={v => updateTask(task.id, 'eta_end', v)} />}
-            {colId === 'assigned' && (
-              <EditableCell
-                value={memberMap[task.assigned_to] || ''}
-                type="select"
-                options={allMembers.map(m => m.name)}
-                onSave={v => {
-                  const member = allMembers.find(m => m.name === v)
-                  updateTask(task.id, 'assigned_to', member?.id || null)
-                }}
-              />
-            )}
-            {colId === 'link' && <LinkCell value={task.link_url} onSave={v => updateTask(task.id, 'link_url', v)} />}
-            {colId === 'internal_approval' && (
-              <EditableCell
-                value={task.internal_approval || 'Pending'}
-                type="internal_approval"
-                options={INTERNAL_APPROVALS}
-                disabled={task.status !== 'Completed'}
-                onSave={v => updateTask(task.id, 'internal_approval', v)}
-              />
-            )}
-            {colId === 'send_link' && (
-              <Button
-                size="sm"
-                variant={task.client_link_visible ? "ghost" : "default"}
-                className={`h-7 px-2 text-[10px] uppercase tracking-wider font-bold ${task.client_link_visible ? 'text-green-600' : ''}`}
-                disabled={
-                  task.status !== 'Completed' ||
-                  task.internal_approval !== 'Approved' ||
-                  !task.link_url ||
-                  task.client_link_visible === true
-                }
-                onClick={() => publishTask(task.id)}
-              >
-                {task.client_link_visible ? 'Sent' : 'Send Link'}
-              </Button>
-            )}
-            {colId === 'client_approval' && <EditableCell value={task.client_approval} type="approval" disabled={true} />}
-            {colId === 'client_feedback' && (
-              <div className="max-w-[150px]">
-                {task.client_approval === 'Required Changes' ? (
-                  <div className="text-[10px] text-red-600 bg-red-50 p-1 rounded border border-red-100 line-clamp-2" title={task.client_feedback_note}>
-                    {task.client_feedback_note}
+              )}
+              {colId === 'title' && (
+                <div className="flex items-center gap-2">
+                  <div {...attributes} {...listeners} className="cursor-grab text-gray-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                    <GripVertical className="w-3 h-3" />
                   </div>
-                ) : <span className="text-gray-300 text-xs">—</span>}
-              </div>
-            )}
-            {colId === 'actions' && (
-              <button onClick={() => deleteTask(task.id)} className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-50 text-red-400 transition-all">
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </td>
-        ))}
+                  {saving[task.id] && <div className="w-1 h-1 rounded-full bg-blue-400 animate-pulse flex-shrink-0" />}
+                  <EditableCell value={task.title} onSave={v => updateTask(task.id, 'title', v)} />
+                </div>
+              )}
+              {colId === 'category' && <EditableCell value={task.category} type="select" options={CATEGORIES} onSave={v => updateTask(task.id, 'category', v)} />}
+              {colId === 'status' && <EditableCell value={task.status} type="status" options={STATUSES} onSave={v => updateTask(task.id, 'status', v)} />}
+              {colId === 'priority' && <EditableCell value={task.priority} type="priority" options={PRIORITIES} onSave={v => updateTask(task.id, 'priority', v)} />}
+              {colId === 'eta' && <EditableCell value={task.eta_end} type="date" onSave={v => updateTask(task.id, 'eta_end', v)} />}
+              {colId === 'assigned' && (
+                <EditableCell
+                  value={memberMap[task.assigned_to] || ''}
+                  type="select"
+                  options={allMembers.map(m => m.name)}
+                  onSave={v => {
+                    const member = allMembers.find(m => m.name === v)
+                    updateTask(task.id, 'assigned_to', member?.id || null)
+                  }}
+                />
+              )}
+              {colId === 'link' && <LinkCell value={task.link_url} onSave={v => updateTask(task.id, 'link_url', v)} />}
+              {colId === 'internal_approval' && (
+                <EditableCell
+                  value={task.internal_approval || 'Pending'}
+                  type="internal_approval"
+                  options={INTERNAL_APPROVALS}
+                  disabled={task.status !== 'Completed'}
+                  onSave={v => updateTask(task.id, 'internal_approval', v)}
+                />
+              )}
+              {colId === 'send_link' && (
+                <Button
+                  size="sm"
+                  variant={task.client_link_visible ? "ghost" : "default"}
+                  className={`h-7 px-2 text-[10px] uppercase tracking-wider font-bold ${task.client_link_visible ? 'text-green-600' : ''}`}
+                  disabled={
+                    task.status !== 'Completed' ||
+                    task.internal_approval !== 'Approved' ||
+                    !task.link_url ||
+                    task.client_link_visible === true
+                  }
+                  onClick={() => publishTask(task.id)}
+                >
+                  {task.client_link_visible ? 'Sent' : 'Send Link'}
+                </Button>
+              )}
+              {colId === 'client_approval' && <EditableCell value={task.client_approval} type="approval" disabled={true} />}
+              {colId === 'client_feedback' && (
+                <div className="max-w-[150px]">
+                  {task.client_approval === 'Required Changes' ? (
+                    <div className="text-[10px] text-red-600 bg-red-50 p-1 rounded border border-red-100 line-clamp-2" title={task.client_feedback_note}>
+                      {task.client_feedback_note}
+                    </div>
+                  ) : <span className="text-gray-300 text-xs">—</span>}
+                </div>
+              )}
+              {colId === 'actions' && (
+                <button onClick={() => deleteTask(task.id)} className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-50 text-red-400 transition-all">
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </td>
+          );
+        })}
       </tr>
     )
   }
@@ -729,115 +781,126 @@ export default function ClientDetailPage() {
   const ContentSortableRow = ({ item }) => {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item?.id || 'unknown' })
     if (!item?.id) return null
-    const style = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 20 : 0 }
+    const style = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 40 : 10 }
+    const rowIndex = allContent.findIndex(i => i.id === item.id)
     return (
       <tr ref={setNodeRef} style={style} className={`hover:bg-gray-50 group border-b border-gray-100 ${isDragging ? 'opacity-50 shadow-lg' : ''}`}>
-        {safeArray(contentColOrder).map(colId => (
-          <td key={colId} className="px-3 py-1.5 overflow-hidden" style={{ width: CONTENT_COLUMN_WIDTHS[colId], minWidth: CONTENT_COLUMN_WIDTHS[colId] }}>
-            {colId === 'selection' && (
-              <div className="flex items-center justify-center">
-                <input
-                  type="checkbox"
-                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                  checked={selectedContent.has(item.id)}
-                  onChange={() => toggleContentSelection(item.id)}
-                />
-              </div>
-            )}
-            {colId === 'week' && (
-              <div className="flex items-center gap-2">
-                <div {...attributes} {...listeners} className="cursor-grab text-gray-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                  <GripVertical className="w-3 h-3" />
+        <td className="px-2 py-1.5 text-center text-gray-400 font-mono text-[11px] bg-white border-r border-gray-100 select-none"
+          style={{ width: '40px', minWidth: '40px', position: 'sticky', left: 0, background: '#fff', zIndex: 20 }}>
+          {rowIndex + 1}
+        </td>
+        {safeArray(contentColOrder).map(colId => {
+          const isSticky = colId === 'title' || colId === 'week'
+          const leftPos = colId === 'week' ? '40px' : '120px'
+          const stickyStyle = isSticky ? { position: 'sticky', left: leftPos, background: '#fff', zIndex: 20, borderRight: '1px solid #f3f4f6', boxShadow: isSticky ? '4px 0 8px -4px rgba(0,0,0,0.1)' : '' } : {}
+          return (
+            <td key={colId} className={`px-3 py-1.5 overflow-hidden ${colId === 'blog_internal_approval' || colId === 'send_link' ? 'bg-gray-50/50' : ''}`}
+              style={{ width: CONTENT_COLUMN_WIDTHS[colId], minWidth: CONTENT_COLUMN_WIDTHS[colId], ...stickyStyle }}>
+              {colId === 'selection' && (
+                <div className="flex items-center justify-center">
+                  <input
+                    type="checkbox"
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
+                    checked={selectedContent.has(item.id)}
+                    onChange={() => toggleContentSelection(item.id)}
+                  />
                 </div>
-                <EditableCell value={item.week} onSave={v => updateContent(item.id, 'week', v)} placeholder="W1" />
-              </div>
-            )}
-            {colId === 'title' && <EditableCell value={item.blog_title} onSave={v => updateContent(item.id, 'blog_title', v)} />}
-            {colId === 'primary_keyword' && <EditableCell value={item.primary_keyword} onSave={v => updateContent(item.id, 'primary_keyword', v)} placeholder="Primary Keyword" />}
-            {colId === 'secondary_keyword' && <EditableCell value={item.secondary_keywords} onSave={v => updateContent(item.id, 'secondary_keywords', v)} placeholder="Secondary Keyword" />}
-            {colId === 'writer' && <EditableCell value={item.writer} onSave={v => updateContent(item.id, 'writer', v)} placeholder="Writer" />}
-            {colId === 'search_volume' && <EditableCell value={item.search_volume != null ? String(item.search_volume) : ''} onSave={v => updateContent(item.id, 'search_volume', v ? parseInt(v.replace(/,/g, ''), 10) : null)} placeholder="Vol" />}
-            {colId === 'outline' && <LinkCell value={item.outline_link} onSave={v => updateContent(item.id, 'outline_link', v)} />}
-            {colId === 'intern_status' && (
-              <select
-                value={item.intern_status || ''}
-                onChange={e => updateContent(item.id, 'intern_status', e.target.value || null)}
-                className={`text-[10px] px-2 py-1 rounded-full border font-medium appearance-none cursor-pointer ${internStatusColors[item.intern_status] || 'bg-gray-50 text-gray-400 border-gray-200'}`}
-              >
-                <option value="">— None —</option>
-                {INTERN_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
-            )}
-            {colId === 'required_by' && <EditableCell value={item.required_by} type="date" onSave={v => updateContent(item.id, 'required_by', v)} />}
-            {colId === 'topic_approval' && (
-              <EditableCell
-                value={item.topic_approval_status || 'Pending'}
-                type="topic_approval"
-                options={TOPIC_APPROVALS}
-                onSave={v => updateContent(item.id, 'topic_approval_status', v)}
-              />
-            )}
-            {colId === 'blog_status' && (
-              <EditableCell
-                value={item.blog_status || 'Draft'}
-                type="blog_status"
-                options={BLOG_STATUSES}
-                onSave={v => updateContent(item.id, 'blog_status', v)}
-              />
-            )}
-            {colId === 'blog_internal_approval' && (
-              <EditableCell
-                value={item.blog_internal_approval || 'Pending'}
-                type="internal_approval"
-                options={CONTENT_INTERNAL_APPROVALS}
-                disabled={!item.blog_doc_link}
-                onSave={v => updateContent(item.id, 'blog_internal_approval', v)}
-              />
-            )}
-            {colId === 'send_link' && (
-              <Button
-                size="sm"
-                variant={item.client_link_visible_blog ? 'ghost' : 'default'}
-                className={`h-7 px-2 text-[10px] uppercase tracking-wider font-bold ${item.client_link_visible_blog ? 'text-green-600' : ''}`}
-                disabled={
-                  item.blog_internal_approval !== 'Approved' ||
-                  !item.blog_doc_link ||
-                  item.client_link_visible_blog === true
-                }
-                onClick={() => publishContent(item.id)}
-              >
-                {item.client_link_visible_blog ? 'Sent' : 'Send Link'}
-              </Button>
-            )}
-            {colId === 'blog_approval' && (
-              <EditableCell value={item.blog_approval_status || 'Pending Review'} type="blog_approval" disabled={true} />
-            )}
-            {colId === 'approved_on' && (
-              <span className="text-xs text-gray-500">{item.blog_approval_date || '—'}</span>
-            )}
-            {colId === 'blog_feedback' && (
-              <div className="max-w-[150px]">
-                {item.blog_approval_status === 'Changes Required' ? (
-                  <div className="text-[10px] text-red-600 bg-red-50 p-1 rounded border border-red-100 line-clamp-2" title={item.blog_client_feedback_note}>
-                    {item.blog_client_feedback_note || 'Changes requested'}
+              )}
+              {colId === 'week' && (
+                <div className="flex items-center gap-2">
+                  <div {...attributes} {...listeners} className="cursor-grab text-gray-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                    <GripVertical className="w-3 h-3" />
                   </div>
-                ) : <span className="text-gray-300 text-xs">—</span>}
-              </div>
-            )}
-            {colId === 'blog_doc' && <LinkCell value={item.blog_doc_link} onSave={v => updateContent(item.id, 'blog_doc_link', v)} />}
-            {colId === 'link' && <LinkCell value={item.blog_link} onSave={v => updateContent(item.id, 'blog_link', v)} />}
-            {colId === 'published' && <EditableCell value={item.published_date} type="date" onSave={v => updateContent(item.id, 'published_date', v)} />}
-            {colId === 'date_sent' && (
-              <span className="text-xs text-gray-500">{item.date_sent_for_approval || '—'}</span>
-            )}
-            {colId === 'comments' && <EditableCell value={item.comments} onSave={v => updateContent(item.id, 'comments', v)} placeholder="Notes..." />}
-            {colId === 'actions' && (
-              <button onClick={() => deleteContent(item.id)} className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-50 text-red-400 transition-all">
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </td>
-        ))}
+                  <EditableCell value={item.week} onSave={v => updateContent(item.id, 'week', v)} placeholder="W1" />
+                </div>
+              )}
+              {colId === 'title' && <EditableCell value={item.blog_title} onSave={v => updateContent(item.id, 'blog_title', v)} />}
+              {colId === 'primary_keyword' && <EditableCell value={item.primary_keyword} onSave={v => updateContent(item.id, 'primary_keyword', v)} placeholder="Primary Keyword" />}
+              {colId === 'secondary_keyword' && <EditableCell value={item.secondary_keywords} onSave={v => updateContent(item.id, 'secondary_keywords', v)} placeholder="Secondary Keyword" />}
+              {colId === 'writer' && <EditableCell value={item.writer} onSave={v => updateContent(item.id, 'writer', v)} placeholder="Writer" />}
+              {colId === 'search_volume' && <EditableCell value={item.search_volume != null ? String(item.search_volume) : ''} onSave={v => updateContent(item.id, 'search_volume', v ? parseInt(v.replace(/,/g, ''), 10) : null)} placeholder="Vol" />}
+              {colId === 'outline' && <LinkCell value={item.outline_link} onSave={v => updateContent(item.id, 'outline_link', v)} />}
+              {colId === 'intern_status' && (
+                <select
+                  value={item.intern_status || ''}
+                  onChange={e => updateContent(item.id, 'intern_status', e.target.value || null)}
+                  className={`text-[10px] px-2 py-1 rounded-full border font-medium appearance-none cursor-pointer ${internStatusColors[item.intern_status] || 'bg-gray-50 text-gray-400 border-gray-200'}`}
+                >
+                  <option value="">— None —</option>
+                  {INTERN_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              )}
+              {colId === 'required_by' && <EditableCell value={item.required_by} type="date" onSave={v => updateContent(item.id, 'required_by', v)} />}
+              {colId === 'topic_approval' && (
+                <EditableCell
+                  value={item.topic_approval_status || 'Pending'}
+                  type="topic_approval"
+                  options={TOPIC_APPROVALS}
+                  onSave={v => updateContent(item.id, 'topic_approval_status', v)}
+                />
+              )}
+              {colId === 'blog_status' && (
+                <EditableCell
+                  value={item.blog_status || 'Draft'}
+                  type="blog_status"
+                  options={BLOG_STATUSES}
+                  onSave={v => updateContent(item.id, 'blog_status', v)}
+                />
+              )}
+              {colId === 'blog_internal_approval' && (
+                <EditableCell
+                  value={item.blog_internal_approval || 'Pending'}
+                  type="internal_approval"
+                  options={CONTENT_INTERNAL_APPROVALS}
+                  disabled={!item.blog_doc_link}
+                  onSave={v => updateContent(item.id, 'blog_internal_approval', v)}
+                />
+              )}
+              {colId === 'send_link' && (
+                <Button
+                  size="sm"
+                  variant={item.client_link_visible_blog ? 'ghost' : 'default'}
+                  className={`h-7 px-2 text-[10px] uppercase tracking-wider font-bold ${item.client_link_visible_blog ? 'text-green-600' : ''}`}
+                  disabled={
+                    item.blog_internal_approval !== 'Approved' ||
+                    !item.blog_doc_link ||
+                    item.client_link_visible_blog === true
+                  }
+                  onClick={() => publishContent(item.id)}
+                >
+                  {item.client_link_visible_blog ? 'Sent' : 'Send Link'}
+                </Button>
+              )}
+              {colId === 'blog_approval' && (
+                <EditableCell value={item.blog_approval_status || 'Pending Review'} type="blog_approval" disabled={true} />
+              )}
+              {colId === 'approved_on' && (
+                <span className="text-xs text-gray-500">{item.blog_approval_date || '—'}</span>
+              )}
+              {colId === 'blog_feedback' && (
+                <div className="max-w-[150px]">
+                  {item.blog_approval_status === 'Changes Required' ? (
+                    <div className="text-[10px] text-red-600 bg-red-50 p-1 rounded border border-red-100 line-clamp-2" title={item.blog_client_feedback_note}>
+                      {item.blog_client_feedback_note || 'Changes requested'}
+                    </div>
+                  ) : <span className="text-gray-300 text-xs">—</span>}
+                </div>
+              )}
+              {colId === 'blog_doc' && <LinkCell value={item.blog_doc_link} onSave={v => updateContent(item.id, 'blog_doc_link', v)} />}
+              {colId === 'link' && <LinkCell value={item.blog_link} onSave={v => updateContent(item.id, 'blog_link', v)} />}
+              {colId === 'published' && <EditableCell value={item.published_date} type="date" onSave={v => updateContent(item.id, 'published_date', v)} />}
+              {colId === 'date_sent' && (
+                <span className="text-xs text-gray-500">{item.date_sent_for_approval || '—'}</span>
+              )}
+              {colId === 'comments' && <EditableCell value={item.comments} onSave={v => updateContent(item.id, 'comments', v)} placeholder="Notes..." />}
+              {colId === 'actions' && (
+                <button onClick={() => deleteContent(item.id)} className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-50 text-red-400 transition-all">
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </td>
+          )
+        })}
       </tr>
     )
   }
@@ -930,6 +993,32 @@ export default function ClientDetailPage() {
 
         {/* ── Timeline Tab ───────────────────────────────────────────────── */}
         <TabsContent value="timeline">
+          <div className="flex flex-wrap items-center gap-3 mb-4 p-4 bg-blue-50/50 border border-blue-100 rounded-lg shadow-sm">
+            <div className="flex-1 min-w-[200px]">
+              <h3 className="text-xs font-bold text-blue-800 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                <Plus className="w-3.5 h-3.5" /> Quick Add Task
+              </h3>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <input
+                    type="text" value={newTask.title}
+                    onChange={e => setNewTask(n => ({ ...n, title: e.target.value }))}
+                    onKeyDown={e => e.key === 'Enter' && addTask()}
+                    placeholder="What needs to be done for this client?"
+                    className="w-full h-9 text-xs px-3 py-1 bg-white border border-blue-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-400/20 focus:border-blue-400 transition-all"
+                    disabled={addingTask}
+                  />
+                </div>
+                <Button
+                  onClick={addTask}
+                  disabled={addingTask || !newTask.title.trim()}
+                  className="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-sm transition-all"
+                >
+                  {addingTask ? 'Saving...' : 'Add Task'}
+                </Button>
+              </div>
+            </div>
+          </div>
           <div className="flex flex-wrap items-center gap-2 mb-4 p-3 bg-white border border-gray-200 rounded-lg">
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
@@ -939,11 +1028,38 @@ export default function ClientDetailPage() {
                 className="h-8 text-xs pl-8 w-48 border-gray-200"
               />
             </div>
-            <Select value={tStatus} onValueChange={v => updateQueryParams({ status: v, page: 1 })}>
-              <SelectTrigger className="w-32 h-8 text-xs"><SelectValue placeholder="Status" /></SelectTrigger>
+            <div className="flex items-center gap-2 mr-2">
+              <Button
+                variant={tStatus === 'all' ? 'default' : 'outline'}
+                size="sm"
+                className="h-8 text-xs px-3"
+                onClick={() => updateQueryParams({ status: 'all' })}
+              >
+                All
+              </Button>
+              <Button
+                variant={tStatus === 'Completed' ? 'default' : 'outline'}
+                size="sm"
+                className="h-8 text-xs px-3"
+                onClick={() => updateQueryParams({ status: 'Completed' })}
+              >
+                Completed
+              </Button>
+              <Button
+                variant={tStatus === 'not_completed' ? 'default' : 'outline'}
+                size="sm"
+                className="h-8 text-xs px-3"
+                onClick={() => updateQueryParams({ status: 'not_completed' })}
+              >
+                Not Completed
+              </Button>
+            </div>
+
+            <Select value={tStatus === 'not_completed' ? 'all' : tStatus} onValueChange={v => updateQueryParams({ status: v })}>
+              <SelectTrigger className="h-8 text-xs w-36"><SelectValue placeholder="Any Status" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Any Status</SelectItem>
-                {STATUSES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                <SelectItem value="all" className="text-xs">Any Status</SelectItem>
+                {STATUSES.map(s => <SelectItem key={s} value={s} className="text-xs">{s}</SelectItem>)}
               </SelectContent>
             </Select>
             <Select value={tCategory} onValueChange={v => updateQueryParams({ category: v, page: 1 })}>
@@ -996,6 +1112,7 @@ export default function ClientDetailPage() {
                   <thead>
                     <SortableContext items={taskColOrder} strategy={horizontalListSortingStrategy}>
                       <tr className="border-b border-gray-100 bg-gray-50/80 sticky top-0 z-10">
+                        <th className="px-2 py-2.5 text-center text-gray-400 font-semibold bg-gray-50 border-r border-gray-100" style={{ width: '40px', minWidth: '40px' }}>#</th>
                         {safeArray(taskColOrder).map(colId => (
                           <SortableHeader key={colId} id={colId} label={taskColLabels[colId]} type="task" />
                         ))}
@@ -1014,25 +1131,6 @@ export default function ClientDetailPage() {
                         {allTasks.map(task => <TaskSortableRow key={task?.id} task={task} />)}
                       </SortableContext>
                     )}
-                    {/* Add row */}
-                    <tr className="bg-gray-50/30 border-t border-dashed border-gray-200">
-                      <td className="px-2 py-2"></td>
-                      <td className="px-3 py-2" colSpan={2}>
-                        <input
-                          type="text" value={newTask.title}
-                          onChange={e => setNewTask(n => ({ ...n, title: e.target.value }))}
-                          onKeyDown={e => e.key === 'Enter' && addTask()}
-                          placeholder="+ Add a task..."
-                          className="w-full text-xs px-2 py-1 bg-transparent border border-dashed border-gray-300 rounded focus:outline-none focus:border-blue-400 focus:bg-white"
-                          disabled={addingTask}
-                        />
-                      </td>
-                      <td colSpan={taskColOrder.length - 3} className="px-3 py-2 text-right">
-                        <Button size="sm" variant="ghost" onClick={addTask} disabled={addingTask || !newTask.title.trim()} className="text-xs h-7">
-                          <Plus className="w-3 h-3 mr-1" />{addingTask ? 'Adding...' : 'Add'}
-                        </Button>
-                      </td>
-                    </tr>
                   </tbody>
                 </table>
               </DndContext>
@@ -1054,6 +1152,32 @@ export default function ClientDetailPage() {
 
         {/* ── Content Calendar Tab ─────────────────────────────────────────── */}
         <TabsContent value="content">
+          <div className="flex flex-wrap items-center gap-3 mb-4 p-4 bg-blue-50/50 border border-blue-100 rounded-lg shadow-sm">
+            <div className="flex-1 min-w-[200px]">
+              <h3 className="text-xs font-bold text-blue-800 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                <Plus className="w-3.5 h-3.5" /> Quick Add Content
+              </h3>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <input
+                    type="text" value={newContent.blog_title}
+                    onChange={e => setNewContent(n => ({ ...n, blog_title: e.target.value }))}
+                    onKeyDown={e => e.key === 'Enter' && addContent()}
+                    placeholder="Blog Topic/Title..."
+                    className="w-full h-9 text-xs px-3 py-1 bg-white border border-blue-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-400/20 focus:border-blue-400 transition-all font-medium"
+                    disabled={addingContent}
+                  />
+                </div>
+                <Button
+                  onClick={addContent}
+                  disabled={addingContent || !newContent.blog_title.trim()}
+                  className="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-sm transition-all"
+                >
+                  {addingContent ? 'Saving...' : 'Add Content'}
+                </Button>
+              </div>
+            </div>
+          </div>
           <div className="flex flex-wrap items-center gap-2 mb-4 p-3 bg-white border border-gray-200 rounded-lg">
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
@@ -1128,14 +1252,8 @@ export default function ClientDetailPage() {
                 Delete {selectedContent.size}
               </Button>
             )}
-            <Button
-              size="sm"
-              className="gap-1.5 h-8 px-4"
-              onClick={() => { addContentInputRef.current?.focus(); addContentInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }) }}
-            >
-              <Plus className="w-4 h-4" /> Add Content
-            </Button>
           </div>
+
           <div className="bg-white border border-gray-200 rounded-lg overflow-auto shadow-sm">
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleContentColDragEnd} modifiers={[restrictToHorizontalAxis]}>
               <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleContentRowDragEnd} modifiers={[restrictToVerticalAxis]}>
@@ -1143,6 +1261,10 @@ export default function ClientDetailPage() {
                   <thead>
                     <SortableContext items={contentColOrder} strategy={horizontalListSortingStrategy}>
                       <tr className="border-b border-gray-100 bg-gray-50/80 sticky top-0 z-10">
+                        <th className="px-2 py-2.5 text-center text-gray-400 font-semibold bg-gray-50 border-r border-gray-100"
+                          style={{ width: '40px', minWidth: '40px', position: 'sticky', left: 0, zIndex: 15 }}>
+                          #
+                        </th>
                         {safeArray(contentColOrder).map(colId => (
                           <SortableHeader key={colId} id={colId} label={contentColLabels[colId]} type="content" />
                         ))}
@@ -1164,26 +1286,6 @@ export default function ClientDetailPage() {
                         ))}
                       </SortableContext>
                     )}
-                    {/* Add row */}
-                    <tr className="bg-gray-50/30 border-t border-dashed border-gray-200">
-                      <td className="px-2 py-2"></td>
-                      <td className="px-3 py-2" colSpan={2}>
-                        <input
-                          ref={addContentInputRef}
-                          type="text" value={newContent.blog_title}
-                          onChange={e => setNewContent(n => ({ ...n, blog_title: e.target.value }))}
-                          onKeyDown={e => e.key === 'Enter' && addContent()}
-                          placeholder="+ Add a blog post..."
-                          className="w-full text-xs px-2 py-1 bg-transparent border border-dashed border-gray-300 rounded focus:outline-none focus:border-blue-400 focus:bg-white"
-                          disabled={addingContent}
-                        />
-                      </td>
-                      <td colSpan={contentColOrder.length - 3} className="px-3 py-2 text-right">
-                        <Button size="sm" variant="ghost" onClick={addContent} disabled={addingContent || !newContent.blog_title.trim()} className="text-xs h-7">
-                          <Plus className="w-3 h-3 mr-1" />{addingContent ? 'Adding...' : 'Add'}
-                        </Button>
-                      </td>
-                    </tr>
                   </tbody>
                 </table>
               </DndContext>
