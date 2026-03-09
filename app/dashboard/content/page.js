@@ -68,7 +68,7 @@ function ContentCalendarContent() {
   if (!queryParams.get('limit')) queryParams.set('limit', '50')
 
   const { data: contentResponse, mutate: mutateContent, error: contentErr } = useSWR(`/api/content?${queryParams.toString()}`, swrFetcher)
-  const { data: clientsData } = useSWR('/api/clients', swrFetcher)
+  const { data: clientsData } = useSWR('/api/clients?lite=1', swrFetcher)
 
   const content = useMemo(() => safeArray(contentResponse?.data), [contentResponse])
   const pagination = useMemo(() => ({

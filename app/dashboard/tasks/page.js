@@ -128,7 +128,7 @@ function TasksPageContent() {
 
     const [tasksRes, clientsRes, membersRes] = await Promise.all([
       apiFetch(`${serviceConfig.endpoint}?${params.toString()}`),
-      apiFetch('/api/clients'),
+      apiFetch('/api/clients?lite=1'),
       apiFetch('/api/team'),
     ])
     const [tasksData, clientsData, membersData] = await Promise.all([

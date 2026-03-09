@@ -32,7 +32,7 @@ function ReportsPageContent() {
 
   const loadData = async () => {
     const params = filterClient && filterClient !== 'all' ? `?client_id=${filterClient}` : ''
-    const [rRes, cRes] = await Promise.all([apiFetch(`/api/reports${params}`), apiFetch('/api/clients')])
+    const [rRes, cRes] = await Promise.all([apiFetch(`/api/reports${params}`), apiFetch('/api/clients?lite=1')])
     const [r, c] = await Promise.all([rRes.json(), cRes.json()])
     setReports(r || [])
     setClients(c || [])

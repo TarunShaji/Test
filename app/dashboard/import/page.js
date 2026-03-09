@@ -95,7 +95,7 @@ function parseSpreadsheet(text) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export default function ImportPage() {
-  const { data: clientsData } = useSWR('/api/clients', swrFetcher)
+  const { data: clientsData } = useSWR('/api/clients?lite=1', swrFetcher)
   const { data: membersData } = useSWR('/api/team', swrFetcher)
 
   const clients = Array.isArray(clientsData) ? clientsData : []
