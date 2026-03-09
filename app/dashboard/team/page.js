@@ -12,6 +12,8 @@ function TeamPageContent() {
   const [members, setMembers] = useState([])
   const [loading, setLoading] = useState(true)
   const [selectedMember, setSelectedMember] = useState(null)
+  const [memberTasks, setMemberTasks] = useState({ seo: [], email: [], paid: [] })
+  const [loadingMemberTasks, setLoadingMemberTasks] = useState(false)
   const [confirmConfig, setConfirmConfig] = useState(null)
 
   const loadData = async () => {
@@ -29,6 +31,22 @@ function TeamPageContent() {
   }
 
   useEffect(() => { loadData() }, [])
+
+  const openMemberTasks = async (member) => {
+    setSelectedMember(member)
+    setLoadingMemberTasks(true)
+    setMemberTasks({ seo: [], email: [], paid: [] })
+    try {
+      const res = await apiFetch(`/api/team/workload/${member.id}`)
+      const payload = await res.json()
+      setMemberTasks(payload?.services || { seo: [], email: [], paid: [] })
+    } catch (e) {
+      console.error('Failed to load member tasks', e)
+      setMemberTasks({ seo: [], email: [], paid: [] })
+    } finally {
+      setLoadingMemberTasks(false)
+    }
+  }
 
   const deactivate = (id) => {
     setConfirmConfig({
@@ -71,7 +89,7 @@ function TeamPageContent() {
           <Card
             key={m.id}
             className="border border-gray-200 hover:shadow-md transition-shadow cursor-pointer"
-            onClick={() => setSelectedMember(m)}
+            onClick={() => openMemberTasks(m)}
           >
             <CardContent className="p-4">
               <div className="flex items-start justify-between">
@@ -114,8 +132,11 @@ function TeamPageContent() {
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 max-h-[60vh] overflow-auto pr-1">
+            {loadingMemberTasks && (
+              <div className="text-sm text-gray-400">Loading tasks...</div>
+            )}
             {serviceSections.map((section) => {
-              const tasks = safeArray(selectedMember?.workload?.services?.[section.key])
+              const tasks = safeArray(memberTasks?.[section.key])
               return (
                 <div key={section.key} className="border border-gray-200 rounded-lg overflow-hidden">
                   <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100 flex items-center justify-between">

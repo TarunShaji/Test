@@ -271,11 +271,12 @@ export default function ClientPortalPage() {
   const [resourceForm, setResourceForm] = useState({ name: '', url: '' })
   const [addingResource, setAddingResource] = useState(false)
   const [portalService, setPortalService] = useState('seo')
+  const [activeTab, setActiveTab] = useState('progress')
 
-  const portalFetcher = async ([url, slug, pwd]) => {
+  const portalFetcher = async ([url, pwd]) => {
     const headers = { 'Content-Type': 'application/json' }
     if (pwd) headers['X-Portal-Password'] = pwd
-    const res = await fetch(`${url}/${slug}`, { headers })
+    const res = await fetch(url, { headers })
     const json = await res.json()
     if (!res.ok) {
       const err = new Error(json.error || 'Failed to fetch')
@@ -286,19 +287,47 @@ export default function ClientPortalPage() {
     return json
   }
 
-  const { data, error: swrErr, isValidating } = useSWR(
-    slug ? ['/api/portal', slug, portalPassword] : null,
+  const progressKey = slug
+    ? [`/api/portal/${slug}?include=client,tasks&service=${portalService}`, portalPassword]
+    : null
+  const contentKey = slug && activeTab === 'content'
+    ? [`/api/portal/${slug}?include=content`, portalPassword]
+    : null
+  const resourcesKey = slug && activeTab === 'resources'
+    ? [`/api/portal/${slug}?include=resources`, portalPassword]
+    : null
+  const reportsKey = slug && activeTab === 'reports'
+    ? [`/api/portal/${slug}?include=reports`, portalPassword]
+    : null
+
+  const { data: progressData, error: swrErr, isValidating } = useSWR(
+    progressKey,
+    portalFetcher,
+    { shouldRetryOnError: false, revalidateOnFocus: false }
+  )
+  const { data: contentData, isValidating: loadingContentTab } = useSWR(
+    contentKey,
+    portalFetcher,
+    { shouldRetryOnError: false, revalidateOnFocus: false }
+  )
+  const { data: resourcesData, isValidating: loadingResourcesTab } = useSWR(
+    resourcesKey,
+    portalFetcher,
+    { shouldRetryOnError: false, revalidateOnFocus: false }
+  )
+  const { data: reportsData, isValidating: loadingReportsTab } = useSWR(
+    reportsKey,
     portalFetcher,
     { shouldRetryOnError: false, revalidateOnFocus: false }
   )
 
-  const tasks = safeArray(data?.tasks)
-  const content = safeArray(data?.content)
-  const client = data?.client
-  const reports = safeArray(data?.reports)
-  const resources = safeArray(data?.resources)
+  const tasks = safeArray(progressData?.tasks)
+  const content = safeArray(contentData?.content)
+  const client = progressData?.client
+  const reports = safeArray(reportsData?.reports)
+  const resources = safeArray(resourcesData?.resources)
 
-  const loading = isValidating && !data
+  const loading = isValidating && !progressData
   const needsPassword = swrErr?.status === 401 && swrErr?.info?.has_password
   const clientName = swrErr?.info?.client_name || ''
   const error = swrErr?.status !== 401 ? swrErr?.message : null
@@ -325,7 +354,8 @@ export default function ClientPortalPage() {
   }, [client])
 
   const handleUpdate = (type, id, field, val) => {
-    mutate(['/api/portal', slug, portalPassword], (current) => {
+    const mutateKey = type === 'task' ? progressKey : contentKey
+    mutate(mutateKey, (current) => {
       if (!current) return current
       if (type === 'task') {
         return { ...current, tasks: safeArray(current.tasks).map(t => t?.id === id ? { ...t, [field]: val } : t) }
@@ -350,7 +380,7 @@ export default function ClientPortalPage() {
       })
       if (res.ok) {
         const newRes = await res.json()
-        mutate(['/api/portal', slug, portalPassword], (cur) => cur ? { ...cur, resources: [...safeArray(cur.resources), newRes] } : cur, false)
+        mutate(resourcesKey, (cur) => cur ? { ...cur, resources: [...safeArray(cur.resources), newRes] } : cur, false)
         setResourceForm({ name: '', url: '' })
         setShowAddResource(false)
       } else {
@@ -398,7 +428,7 @@ export default function ClientPortalPage() {
       <div className="text-center"><div className="text-gray-300 text-6xl mb-4">404</div><p className="text-gray-500">{error}</p></div>
     </div>
   )
-  if (!data) return null
+  if (!progressData) return null
 
   // data is already destructured into client and reports above
   const currentTasks = safeArray(tasks).filter(t => t.service === portalService)
@@ -464,7 +494,7 @@ export default function ClientPortalPage() {
           </div>
         </div>
 
-        <Tabs defaultValue="progress">
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="mb-6">
             <TabsTrigger value="progress" className="gap-1.5">
               <CheckCircle2 className="w-4 h-4" /> Project Progress
@@ -568,6 +598,9 @@ export default function ClientPortalPage() {
 
           {/* ── Content Calendar Tab ──────────────────────────────────────── */}
           <TabsContent value="content">
+            {loadingContentTab && (
+              <div className="text-center py-6 text-gray-400">Loading content...</div>
+            )}
             {content.length === 0 ? (
               <div className="text-center py-16">
                 <FileText className="w-10 h-10 text-gray-200 mx-auto mb-3" />
@@ -666,6 +699,9 @@ export default function ClientPortalPage() {
 
           {/* ── Resources Tab ────────────────────────────────────────────── */}
           <TabsContent value="resources">
+            {loadingResourcesTab && (
+              <div className="text-center py-6 text-gray-400">Loading resources...</div>
+            )}
             <div className="flex justify-end mb-4">
               <Button size="sm" className="gap-1.5" onClick={() => setShowAddResource(true)}>
                 <span className="text-base leading-none">+</span> Add Resource
@@ -708,6 +744,9 @@ export default function ClientPortalPage() {
 
           {/* ── Reports Tab ─────────────────────────────────────────────── */}
           <TabsContent value="reports">
+            {loadingReportsTab && (
+              <div className="text-center py-6 text-gray-400">Loading reports...</div>
+            )}
             {reports.length === 0 ? (
               <div className="text-center py-16">
                 <BarChart3 className="w-10 h-10 text-gray-200 mx-auto mb-3" />

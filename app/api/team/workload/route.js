@@ -5,19 +5,6 @@ import { safeArray } from '@/lib/safe'
 
 export const runtime = 'nodejs';
 
-const isActiveTask = (status) => status !== 'Completed'
-
-function shapeTask(task, service, clientMap) {
-    return {
-        id: task.id,
-        title: task.title,
-        status: task.status,
-        client_id: task.client_id,
-        client_name: clientMap[task.client_id] || 'Unknown',
-        service
-    }
-}
-
 export async function GET(request) {
     return withAuth(request, async () => {
         const database = await connectToMongo()
@@ -35,56 +22,44 @@ export async function GET(request) {
             return handleCORS(NextResponse.json([]))
         }
 
-        const taskQuery = { assigned_to: { $in: memberIds } }
-        const [seoTasks, emailTasks, paidTasks] = await Promise.all([
-            database.collection('tasks').find(taskQuery).toArray(),
-            database.collection('email_tasks').find(taskQuery).toArray(),
-            database.collection('paid_tasks').find(taskQuery).toArray(),
-        ])
-
-        const allTasks = [...safeArray(seoTasks), ...safeArray(emailTasks), ...safeArray(paidTasks)]
-        const clientIds = [...new Set(allTasks.map((t) => t.client_id).filter(Boolean))]
-        const clients = clientIds.length
-            ? await database.collection('clients').find({ id: { $in: clientIds } }).toArray()
-            : []
-        const clientMap = Object.fromEntries(safeArray(clients).map((c) => [c.id, c.name]))
-
         const byMember = Object.fromEntries(memberIds.map((id) => [
             id,
             {
                 total_tasks: 0,
-                active_tasks: 0,
-                services: { seo: [], email: [], paid: [] }
+                active_tasks: 0
             }
         ]))
 
-        for (const task of safeArray(seoTasks)) {
-            if (!byMember[task.assigned_to]) continue
-            byMember[task.assigned_to].total_tasks += 1
-            if (isActiveTask(task.status)) byMember[task.assigned_to].active_tasks += 1
-            byMember[task.assigned_to].services.seo.push(shapeTask(task, 'seo', clientMap))
-        }
+        const aggregation = [
+            { $match: { assigned_to: { $in: memberIds } } },
+            {
+                $group: {
+                    _id: '$assigned_to',
+                    total: { $sum: 1 },
+                    active: {
+                        $sum: { $cond: [{ $ne: ['$status', 'Completed'] }, 1, 0] }
+                    }
+                }
+            }
+        ]
 
-        for (const task of safeArray(emailTasks)) {
-            if (!byMember[task.assigned_to]) continue
-            byMember[task.assigned_to].total_tasks += 1
-            if (isActiveTask(task.status)) byMember[task.assigned_to].active_tasks += 1
-            byMember[task.assigned_to].services.email.push(shapeTask(task, 'email', clientMap))
-        }
+        const [seoCounts, emailCounts, paidCounts] = await Promise.all([
+            database.collection('tasks').aggregate(aggregation).toArray(),
+            database.collection('email_tasks').aggregate(aggregation).toArray(),
+            database.collection('paid_tasks').aggregate(aggregation).toArray(),
+        ])
 
-        for (const task of safeArray(paidTasks)) {
-            if (!byMember[task.assigned_to]) continue
-            byMember[task.assigned_to].total_tasks += 1
-            if (isActiveTask(task.status)) byMember[task.assigned_to].active_tasks += 1
-            byMember[task.assigned_to].services.paid.push(shapeTask(task, 'paid', clientMap))
+        for (const row of [...safeArray(seoCounts), ...safeArray(emailCounts), ...safeArray(paidCounts)]) {
+            if (!byMember[row._id]) continue
+            byMember[row._id].total_tasks += row.total || 0
+            byMember[row._id].active_tasks += row.active || 0
         }
 
         const response = cleanMembers.map((member) => ({
             ...member,
             workload: byMember[member.id] || {
                 total_tasks: 0,
-                active_tasks: 0,
-                services: { seo: [], email: [], paid: [] }
+                active_tasks: 0
             }
         }))
 
