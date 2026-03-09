@@ -7,7 +7,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { ExternalLink, BarChart3, CheckCircle2, Loader2, Lock, ChevronDown, ChevronRight, Link2, FileText, Library, Folder, Image } from 'lucide-react'
+import { ExternalLink, BarChart3, CheckCircle2, Loader2, Lock, Link2, FileText, Library, Folder, Image } from 'lucide-react'
 import { safeURL, safeJSON, safeArray } from '@/lib/safe'
 import { normalizeUrl } from '@/lib/utils'
 
@@ -267,7 +267,6 @@ export default function ClientPortalPage() {
   const [password, setPassword] = useState('')
   const [portalPassword, setPortalPassword] = useState('')
   const [passwordError, setPasswordError] = useState('')
-  const [collapsed, setCollapsed] = useState({})
   const [showAddResource, setShowAddResource] = useState(false)
   const [resourceForm, setResourceForm] = useState({ name: '', url: '' })
   const [addingResource, setAddingResource] = useState(false)
@@ -360,8 +359,6 @@ export default function ClientPortalPage() {
     } catch { alert('Network error') } finally { setAddingResource(false) }
   }
 
-  const toggleCategory = (cat) => setCollapsed(c => ({ ...c, [cat]: !c[cat] }))
-
   // ── Password gate ──────────────────────────────────────────────────────────
   if (loading) return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -412,13 +409,6 @@ export default function ClientPortalPage() {
   const pending = currentTasks.filter(t => !t?.client_approval || t?.client_approval === 'Pending Review').length
 
   const filteredTasks = currentTasks
-
-  const byCategory = filteredTasks.reduce((acc, task) => {
-    const cat = task?.category || (task?.service === 'email' ? 'Email Campaign' : task?.service === 'paid' ? 'Paid Campaign' : 'Other')
-    if (!acc[cat]) acc[cat] = []
-    acc[cat].push(task)
-    return acc
-  }, {})
 
   const lastUpdated = currentTasks.length > 0
     ? new Date(Math.max(...currentTasks.map(t => new Date(t?.updated_at || t?.created_at)))).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
@@ -517,78 +507,61 @@ export default function ClientPortalPage() {
               </div>
             </div>
 
-            {Object.keys(byCategory).length === 0 ? (
+            {filteredTasks.length === 0 ? (
               <div className="text-center py-16 text-gray-400">No tasks yet.</div>
             ) : (
-              <div className="space-y-3">
-                {Object.entries(byCategory).map(([category, catTasks]) => (
-                  <div key={category} className="bg-white rounded-xl border border-gray-200 overflow-visible">
-                    <button className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-gray-50 transition-colors" onClick={() => toggleCategory(category)}>
-                      <div className="flex items-center gap-2.5">
-                        {collapsed[category] ? <ChevronRight className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
-                        <span className="font-semibold text-gray-800 text-sm">{category}</span>
-                        <span className="text-xs text-gray-400">({safeArray(catTasks).length})</span>
-                      </div>
-                      <span className="text-xs text-gray-400">{safeArray(catTasks).filter(t => t?.status === 'Completed').length}/{safeArray(catTasks).length} done</span>
-                    </button>
-
-                    {!collapsed[category] && (
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-sm border-t border-gray-100" style={{ tableLayout: 'fixed', minWidth: '1000px' }}>
-                          <thead>
-                            <tr className="bg-gray-50">
-                              <th className="text-left px-5 py-2 text-xs font-semibold text-gray-500" style={{ width: TASK_COLUMN_WIDTHS.title }}>Task</th>
-                              <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500" style={{ width: TASK_COLUMN_WIDTHS.status }}>Status</th>
-                              <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500" style={{ width: TASK_COLUMN_WIDTHS.eta }}>{portalService === 'email' ? 'Campaign Live' : 'ETA End'}</th>
-                              <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500" style={{ width: TASK_COLUMN_WIDTHS.client_feedback || '200px' }}>Notes</th>
-                              <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500" style={{ width: TASK_COLUMN_WIDTHS.link }}>Link</th>
-                              <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500" style={{ width: TASK_COLUMN_WIDTHS.client_approval }}>Your Approval</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-50">
-                            {safeArray(catTasks).map(task => (
-                              <tr key={task?.id} className="hover:bg-gray-50 transition-colors border-b border-gray-50 last:border-0">
-                                <td className="px-5 py-4 font-medium text-gray-800 text-sm truncate" title={task?.title}>{task?.title}</td>
-                                <td className="px-4 py-4 overflow-hidden">
-                                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border whitespace-nowrap ${statusColors[task?.status] || 'bg-gray-100 text-gray-600 border-gray-200'}`}>
-                                    {task?.status}
-                                  </span>
-                                </td>
-                                <td className="px-4 py-4 text-xs text-gray-500 truncate">{task?.eta_end || task?.campaign_live || '—'}</td>
-                                <td className="px-4 py-4 text-xs text-gray-500 truncate" title={task?.client_approval === 'Required Changes' ? task?.client_feedback_note : (task?.remarks || '')}>
-                                  {task?.client_approval === 'Required Changes' ? task?.client_feedback_note : (task?.remarks || '—')}
-                                </td>
-                                <td className="px-4 py-4 text-center overflow-hidden">
-                                  {task?.client_link_visible && task?.link_url ? (
-                                    <a href={normalizeUrl(task.link_url)} target="_blank" rel="noopener noreferrer"
-                                      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white text-xs font-bold transition-all shadow-sm whitespace-nowrap">
-                                      <Link2 className="w-3.5 h-3.5" /> View
-                                    </a>
-                                  ) : (
-                                    <div className="inline-flex items-center gap-1.5 text-gray-300 text-[10px] font-bold uppercase tracking-widest whitespace-nowrap">
-                                      <Lock className="w-3 h-3" /> Pending Review
-                                    </div>
-                                  )}
-                                </td>
-                                <td className="px-4 py-4">
-                                  <ApprovalButton
-                                    taskId={task?.id}
-                                    current={task?.client_approval}
-                                    slug={slug}
-                                    portalPassword={portalPassword}
-                                    disabled={!task?.client_link_visible}
-                                    service={task?.service}
-                                    onUpdate={handleApprovalUpdate}
-                                  />
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </div>
-                ))}
+              <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
+                <table className="w-full text-sm" style={{ tableLayout: 'fixed', minWidth: '1000px' }}>
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-100">
+                      <th className="text-left px-5 py-2 text-xs font-semibold text-gray-500" style={{ width: TASK_COLUMN_WIDTHS.title }}>Task</th>
+                      <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500" style={{ width: TASK_COLUMN_WIDTHS.status }}>Status</th>
+                      <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500" style={{ width: TASK_COLUMN_WIDTHS.eta }}>{portalService === 'email' ? 'Campaign Live' : 'ETA End'}</th>
+                      <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500" style={{ width: TASK_COLUMN_WIDTHS.client_feedback || '200px' }}>Notes</th>
+                      <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500" style={{ width: TASK_COLUMN_WIDTHS.link }}>Link</th>
+                      <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500" style={{ width: TASK_COLUMN_WIDTHS.client_approval }}>Your Approval</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {safeArray(filteredTasks).map(task => (
+                      <tr key={task?.id} className="hover:bg-gray-50 transition-colors border-b border-gray-50 last:border-0">
+                        <td className="px-5 py-4 font-medium text-gray-800 text-sm truncate" title={task?.title}>{task?.title}</td>
+                        <td className="px-4 py-4 overflow-hidden">
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border whitespace-nowrap ${statusColors[task?.status] || 'bg-gray-100 text-gray-600 border-gray-200'}`}>
+                            {task?.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-4 text-xs text-gray-500 truncate">{task?.eta_end || task?.campaign_live_date || task?.campaign_live || '—'}</td>
+                        <td className="px-4 py-4 text-xs text-gray-500 truncate" title={task?.client_approval === 'Required Changes' ? task?.client_feedback_note : (task?.remarks || '')}>
+                          {task?.client_approval === 'Required Changes' ? task?.client_feedback_note : (task?.remarks || '—')}
+                        </td>
+                        <td className="px-4 py-4 text-center overflow-hidden">
+                          {task?.client_link_visible && task?.link_url ? (
+                            <a href={normalizeUrl(task.link_url)} target="_blank" rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white text-xs font-bold transition-all shadow-sm whitespace-nowrap">
+                              <Link2 className="w-3.5 h-3.5" /> View
+                            </a>
+                          ) : (
+                            <div className="inline-flex items-center gap-1.5 text-gray-300 text-[10px] font-bold uppercase tracking-widest whitespace-nowrap">
+                              <Lock className="w-3 h-3" /> Pending Review
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-4">
+                          <ApprovalButton
+                            taskId={task?.id}
+                            current={task?.client_approval}
+                            slug={slug}
+                            portalPassword={portalPassword}
+                            disabled={!task?.client_link_visible}
+                            service={task?.service}
+                            onUpdate={handleApprovalUpdate}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </TabsContent>
