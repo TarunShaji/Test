@@ -107,9 +107,9 @@ We use **SWR** to manage server state.
 
 ### Scripts
 - `npm run dev`: Starts the local development server.
-- `yarn setup:db`: Applies MongoDB indexes (defined in `scripts/inject_chaos.js` and others).
+- `yarn setup:db`: Applies MongoDB indexes (defined in `scripts/db-setup.js`).
 - `scripts/db-reset-all.js`: Clears all collections.
 
 ### Quality Assurance
 - **Build Check**: Always run `npm run build` before pushing.
-- **Zod Verification**: Use `tests/zod_verification_api.mjs` to test schema constraints.
+- **Schema Validation**: Zod schemas are enforced in API routes via `validateBody(...)` middleware.

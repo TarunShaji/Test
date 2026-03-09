@@ -16,7 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { EditableCell } from '@/components/table/EditableCell'
 import { LinkCell } from '@/components/table/LinkCell'
-import { Plus, ExternalLink, Trash2, Link2, Settings, BarChart3, FileText, GripVertical, GripHorizontal, Folder, Image, Library, Search, Mail, TrendingUp, FolderOpen } from 'lucide-react'
+import { Plus, ExternalLink, Trash2, Link2, Settings, BarChart3, FileText, GripVertical, GripHorizontal, Folder, Image, Library, Search, Mail, TrendingUp, FolderOpen, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog'
 import {
   DndContext,
@@ -58,6 +58,8 @@ function ClientDetailPageContent() {
   const tPriority = searchParams.get('priority') || 'all'
   const tSearch = searchParams.get('search') || ''
   const tService = searchParams.get('service') || 'seo'
+  const tSortBy = searchParams.get('t_sort_by') || ''
+  const tSortDir = searchParams.get('t_sort_dir') === 'desc' ? 'desc' : 'asc'
   const tPage = parseInt(searchParams.get('page')) || 1
 
   const getServiceConfig = (srv) => {
@@ -97,6 +99,8 @@ function ClientDetailPageContent() {
   const cClientAppr = searchParams.get('c_client') || 'all'
   const cPublished = searchParams.get('c_published') || 'all'
   const cSearch = searchParams.get('c_search') || ''
+  const cSortBy = searchParams.get('c_sort_by') || ''
+  const cSortDir = searchParams.get('c_sort_dir') === 'desc' ? 'desc' : 'asc'
   const cPage = parseInt(searchParams.get('c_page')) || 1
 
   const updateQueryParams = (updates) => {
@@ -180,6 +184,8 @@ function ClientDetailPageContent() {
   const [selectedContent, setSelectedContent] = useState(new Set())
   const [bulkDeleting, setBulkDeleting] = useState(false)
   const [bulkDeletingContent, setBulkDeletingContent] = useState(false)
+  const taskSortConfig = useMemo(() => ({ field: tSortBy || null, direction: tSortDir }), [tSortBy, tSortDir])
+  const contentSortConfig = useMemo(() => ({ field: cSortBy || null, direction: cSortDir }), [cSortBy, cSortDir])
   const addContentInputRef = useRef(null)
 
   useEffect(() => {
@@ -579,6 +585,59 @@ function ClientDetailPageContent() {
   const completedTasks = useMemo(() => allTasks.filter(t => t?.status === 'Completed').length, [allTasks])
   const progress = useMemo(() => allTasks.length > 0 ? Math.round((completedTasks / allTasks.length) * 100) : 0, [allTasks.length, completedTasks])
   const memberMap = useMemo(() => Object.fromEntries(allMembers.map(m => [m?.id, m?.name])), [allMembers])
+  const getDateValue = (value) => {
+    if (!value) return Number.NaN
+    if (value instanceof Date) return value.getTime()
+    const str = String(value).trim()
+    if (!str) return Number.NaN
+    const direct = Date.parse(str)
+    if (!Number.isNaN(direct)) return direct
+    const ddmmyyyy = str.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/)
+    if (ddmmyyyy) {
+      const day = Number(ddmmyyyy[1])
+      const month = Number(ddmmyyyy[2]) - 1
+      let year = Number(ddmmyyyy[3])
+      if (year < 100) year += 2000
+      return new Date(year, month, day).getTime()
+    }
+    return Number.NaN
+  }
+
+  const getTaskSortableValue = (task, field) => {
+    if (!task || !field) return ''
+    if (field === 'assigned_name') return memberMap[task.assigned_to] || ''
+    if (['eta_end', 'campaign_live_date', 'live_data'].includes(field)) return getDateValue(task[field])
+    return task[field] ?? ''
+  }
+
+  const getContentSortableValue = (item, field) => {
+    if (!item || !field) return ''
+    if (['required_by', 'published_date', 'blog_approval_date', 'date_sent_for_approval'].includes(field)) return getDateValue(item[field])
+    return item[field] ?? ''
+  }
+
+  const sortRows = (rows, sortConfig, getValue) => {
+    if (!sortConfig.field) return rows
+    const factor = sortConfig.direction === 'asc' ? 1 : -1
+    return [...rows].sort((a, b) => {
+      const aVal = getValue(a, sortConfig.field)
+      const bVal = getValue(b, sortConfig.field)
+      const aNum = typeof aVal === 'number'
+      const bNum = typeof bVal === 'number'
+      if (aNum && bNum) {
+        const aNaN = Number.isNaN(aVal)
+        const bNaN = Number.isNaN(bVal)
+        if (aNaN && bNaN) return 0
+        if (aNaN) return 1
+        if (bNaN) return -1
+        return (aVal - bVal) * factor
+      }
+      return String(aVal).localeCompare(String(bVal), undefined, { sensitivity: 'base', numeric: true }) * factor
+    })
+  }
+
+  const sortedTasks = useMemo(() => sortRows(allTasks, taskSortConfig, getTaskSortableValue), [allTasks, taskSortConfig, memberMap])
+  const sortedContent = useMemo(() => sortRows(allContent, contentSortConfig, getContentSortableValue), [allContent, contentSortConfig])
   const approvalCount = useMemo(() => allTasks.filter(t => t?.client_approval === 'Approved').length, [allTasks])
   const changesCount = useMemo(() => allTasks.filter(t => t?.client_approval === 'Required Changes' || t?.client_approval === 'Changes Required').length, [allTasks])
 
@@ -588,6 +647,7 @@ function ClientDetailPageContent() {
   )
 
   const handleTaskRowDragEnd = async (event) => {
+    if (taskSortConfig.field) return
     const { active, over } = event
     if (!over) return
     if (active.id !== over.id) {
@@ -623,6 +683,7 @@ function ClientDetailPageContent() {
   }
 
   const handleContentRowDragEnd = async (event) => {
+    if (contentSortConfig.field) return
     const { active, over } = event
     if (!over) return
     if (active.id !== over.id) {
@@ -656,11 +717,22 @@ function ClientDetailPageContent() {
     }
   }
 
+  const handleSort = (field, type = 'task') => {
+    if (!field) return
+    if (type === 'task') {
+      const nextDirection = taskSortConfig.field === field && taskSortConfig.direction === 'asc' ? 'desc' : 'asc'
+      updateQueryParams({ t_sort_by: field, t_sort_dir: nextDirection, page: 1 })
+      return
+    }
+    const nextDirection = contentSortConfig.field === field && contentSortConfig.direction === 'asc' ? 'desc' : 'asc'
+    updateQueryParams({ c_sort_by: field, c_sort_dir: nextDirection, c_page: 1 })
+  }
+
   if (!client && !clientErr) return <div className="p-8 text-gray-400">Loading...</div>
   if (!client || clientErr) return <div className="p-8 text-gray-400">Client not found</div>
 
   // --- Sortable Components ---
-  const SortableHeader = ({ id, label, sortField: sField, handleSort, type = 'task' }) => {
+  const SortableHeader = ({ id, label, sortField: sField, type = 'task' }) => {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: id || 'header' })
     const widths = type === 'task' ? serviceConfig.widths : CONTENT_COLUMN_WIDTHS
     const isContent = type === 'content'
@@ -703,7 +775,22 @@ function ClientDetailPageContent() {
               <GripHorizontal className="w-3 h-3" />
             </div>
           )}
-          <span className="truncate" title={label}>{label}</span>
+          <button
+            type="button"
+            onClick={() => handleSort(sField, type)}
+            className={`truncate inline-flex items-center gap-1 ${sField ? 'cursor-pointer hover:text-gray-900' : 'cursor-default'}`}
+            title={label}
+            disabled={!sField}
+          >
+            <span className="truncate">{label}</span>
+            {sField && (
+              (type === 'task' ? taskSortConfig.field : contentSortConfig.field) === sField
+                ? ((type === 'task' ? taskSortConfig.direction : contentSortConfig.direction) === 'asc'
+                  ? <ArrowUp className="w-3 h-3 flex-shrink-0" />
+                  : <ArrowDown className="w-3 h-3 flex-shrink-0" />)
+                : <ArrowUpDown className="w-3 h-3 flex-shrink-0 text-gray-400" />
+            )}
+          </button>
         </div>
       </th>
     )
@@ -718,7 +805,7 @@ function ClientDetailPageContent() {
       <tr ref={setNodeRef} style={style} className={`hover:bg-gray-50 group border-b border-gray-100 ${isDragging ? 'opacity-50 shadow-lg' : ''}`}>
         <td className="px-2 py-1.5 text-center text-gray-400 font-mono text-[11px] bg-gray-50/50 border-r border-gray-100 select-none"
           style={{ width: '40px', minWidth: '40px', position: 'sticky', left: 0, zIndex: 20 }}>
-          {allTasks.findIndex(t => t.id === task.id) + 1}
+          {sortedTasks.findIndex(t => t.id === task.id) + 1}
         </td>
         {safeArray(taskColOrder).map(colId => {
           const isTaskSticky = colId === 'title' || colId === 'selection'
@@ -748,9 +835,11 @@ function ClientDetailPageContent() {
               {
                 colId === 'title' && (
                   <div className="flex items-center gap-2">
-                    <div {...attributes} {...listeners} className="cursor-grab text-gray-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                      <GripVertical className="w-3 h-3" />
-                    </div>
+                    {!taskSortConfig.field && (
+                      <div {...attributes} {...listeners} className="cursor-grab text-gray-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                        <GripVertical className="w-3 h-3" />
+                      </div>
+                    )}
                     {saving[task.id] && <div className="w-1 h-1 rounded-full bg-blue-400 animate-pulse flex-shrink-0" />}
                     <EditableCell value={task.title} onSave={v => updateTask(task.id, 'title', v)} />
                   </div>
@@ -831,7 +920,7 @@ function ClientDetailPageContent() {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item?.id || 'unknown' })
     if (!item?.id) return null
     const style = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 40 : 10 }
-    const rowIndex = allContent.findIndex(i => i.id === item.id)
+    const rowIndex = sortedContent.findIndex(i => i.id === item.id)
     return (
       <tr ref={setNodeRef} style={style} className={`hover:bg-gray-50 group border-b border-gray-100 ${isDragging ? 'opacity-50 shadow-lg' : ''}`}>
         <td className="px-2 py-1.5 text-center text-gray-400 font-mono text-[11px] bg-white border-r border-gray-100 select-none"
@@ -857,9 +946,11 @@ function ClientDetailPageContent() {
               )}
               {colId === 'week' && (
                 <div className="flex items-center gap-2">
-                  <div {...attributes} {...listeners} className="cursor-grab text-gray-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                    <GripVertical className="w-3 h-3" />
-                  </div>
+                  {!contentSortConfig.field && (
+                    <div {...attributes} {...listeners} className="cursor-grab text-gray-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                      <GripVertical className="w-3 h-3" />
+                    </div>
+                  )}
                   <EditableCell value={item.week} onSave={v => updateContent(item.id, 'week', v)} placeholder="W1" />
                 </div>
               )}
@@ -961,6 +1052,20 @@ function ClientDetailPageContent() {
     campaign_live: 'Campaign Live', live_data: 'Live Data',
     send_link: 'Send Link', client_approval: 'Client Approval', client_feedback: 'Feedback', actions: ''
   }
+  const taskSortFields = {
+    title: 'title',
+    category: 'category',
+    status: 'status',
+    priority: 'priority',
+    eta: 'eta_end',
+    assigned: 'assigned_name',
+    link: 'link_url',
+    internal_approval: 'internal_approval',
+    campaign_live: 'campaign_live_date',
+    live_data: 'live_data',
+    client_approval: 'client_approval',
+    client_feedback: 'client_feedback_note'
+  }
 
   const contentColLabels = {
     selection: '',
@@ -973,6 +1078,29 @@ function ClientDetailPageContent() {
     date_sent: 'Sent For Appr.',
     blog_approval: 'Client Approval', approved_on: 'Approved On', blog_feedback: 'Feedback',
     link: 'Blog Link', published: 'Published', comments: 'Notes', actions: ''
+  }
+  const contentSortFields = {
+    week: 'week',
+    title: 'blog_title',
+    primary_keyword: 'primary_keyword',
+    secondary_keyword: 'secondary_keywords',
+    writer: 'writer',
+    outline: 'outline_link',
+    intern_status: 'intern_status',
+    search_volume: 'search_volume',
+    required_by: 'required_by',
+    topic_approval: 'topic_approval_status',
+    blog_status: 'blog_status',
+    blog_doc: 'blog_doc_link',
+    blog_internal_approval: 'blog_internal_approval',
+    send_link: 'client_link_visible_blog',
+    date_sent: 'date_sent_for_approval',
+    blog_approval: 'blog_approval_status',
+    approved_on: 'blog_approval_date',
+    blog_feedback: 'blog_client_feedback_note',
+    link: 'blog_link',
+    published: 'published_date',
+    comments: 'comments'
   }
 
   return (
@@ -1208,21 +1336,21 @@ function ClientDetailPageContent() {
                       <tr className="border-b border-gray-100 bg-gray-50/80 sticky top-0 z-10">
                         <th className="px-2 py-2.5 text-center text-gray-400 font-semibold bg-gray-50 border-r border-gray-100" style={{ width: '40px', minWidth: '40px' }}>#</th>
                         {safeArray(taskColOrder).map(colId => (
-                          <SortableHeader key={colId} id={colId} label={taskColLabels[colId]} type="task" />
+                          <SortableHeader key={colId} id={colId} label={taskColLabels[colId]} sortField={taskSortFields[colId]} type="task" />
                         ))}
                       </tr>
                     </SortableContext>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
-                    {allTasks.length === 0 ? (
+                    {sortedTasks.length === 0 ? (
                       <tr>
                         <td colSpan={taskColOrder.length} className="px-4 py-16 text-center text-gray-400">
                           No tasks yet. Add your first task below.
                         </td>
                       </tr>
                     ) : (
-                      <SortableContext items={allTasks.map(t => t?.id)} strategy={verticalListSortingStrategy}>
-                        {allTasks.map(task => <TaskSortableRow key={task?.id} task={task} />)}
+                      <SortableContext items={sortedTasks.map(t => t?.id)} strategy={verticalListSortingStrategy}>
+                        {sortedTasks.map(task => <TaskSortableRow key={task?.id} task={task} />)}
                       </SortableContext>
                     )}
                   </tbody>
@@ -1360,13 +1488,13 @@ function ClientDetailPageContent() {
                           #
                         </th>
                         {safeArray(contentColOrder).map(colId => (
-                          <SortableHeader key={colId} id={colId} label={contentColLabels[colId]} type="content" />
+                          <SortableHeader key={colId} id={colId} label={contentColLabels[colId]} sortField={contentSortFields[colId]} type="content" />
                         ))}
                       </tr>
                     </SortableContext>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
-                    {allContent.length === 0 ? (
+                    {sortedContent.length === 0 ? (
                       <tr>
                         <td colSpan={contentColOrder.length} className="px-4 py-16 text-center text-gray-400">
                           <FileText className="w-8 h-8 mx-auto mb-2 text-gray-200" />
@@ -1374,8 +1502,8 @@ function ClientDetailPageContent() {
                         </td>
                       </tr>
                     ) : (
-                      <SortableContext items={allContent.map(i => i?.id)} strategy={verticalListSortingStrategy}>
-                        {allContent.map(item => (
+                      <SortableContext items={sortedContent.map(i => i?.id)} strategy={verticalListSortingStrategy}>
+                        {sortedContent.map(item => (
                           <ContentSortableRow key={item?.id} item={item} />
                         ))}
                       </SortableContext>

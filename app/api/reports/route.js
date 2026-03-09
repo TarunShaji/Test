@@ -14,8 +14,17 @@ export async function GET(request) {
         const url = safeURL(request.url)
         const clientId = url.searchParams.get('client_id')
         const query = clientId ? { client_id: clientId } : {}
+        const pageParam = url.searchParams.get('page')
+        const limitParam = url.searchParams.get('limit')
+        const usePagination = pageParam !== null || limitParam !== null
+        const page = Math.max(parseInt(pageParam || '1', 10), 1)
+        const limit = Math.max(parseInt(limitParam || '50', 10), 1)
+        const skip = (page - 1) * limit
 
-        const reports = await database.collection('reports').find(query).sort({ report_date: -1 }).toArray()
+        const cursor = database.collection('reports').find(query).sort({ report_date: -1 })
+        const reports = usePagination
+            ? await cursor.skip(skip).limit(limit).toArray()
+            : await cursor.toArray()
         const clean = safeArray(reports).map(({ _id, ...r }) => r)
 
         // Enrich with client names
@@ -24,7 +33,18 @@ export async function GET(request) {
         const clientMap = Object.fromEntries(safeArray(clients).map(c => [c.id, c.name]))
 
         const enriched = clean.map(r => ({ ...r, client_name: clientMap[r.client_id] || 'Unknown' }))
-        return handleCORS(NextResponse.json(enriched))
+        if (!usePagination) {
+            return handleCORS(NextResponse.json(enriched))
+        }
+
+        const total = await database.collection('reports').countDocuments(query)
+        const totalPages = Math.ceil(total / limit)
+        return handleCORS(NextResponse.json({
+            data: enriched,
+            total,
+            page,
+            totalPages
+        }))
     })
 }
 

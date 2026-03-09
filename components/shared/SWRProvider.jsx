@@ -6,6 +6,7 @@ export function SWRProvider({ children }) {
     return (
         <SWRConfig
             value={{
+                dedupingInterval: 5000,
                 onError: (error, key) => {
                     console.error(`[SWR_ERROR] Key: ${key}`, error);
                 },

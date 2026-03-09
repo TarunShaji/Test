@@ -303,22 +303,22 @@ export default function ClientPortalPage() {
   const { data: progressData, error: swrErr, isValidating } = useSWR(
     progressKey,
     portalFetcher,
-    { shouldRetryOnError: false, revalidateOnFocus: false }
+    { shouldRetryOnError: false, revalidateOnFocus: false, revalidateIfStale: false }
   )
   const { data: contentData, isValidating: loadingContentTab } = useSWR(
     contentKey,
     portalFetcher,
-    { shouldRetryOnError: false, revalidateOnFocus: false }
+    { shouldRetryOnError: false, revalidateOnFocus: false, revalidateIfStale: false }
   )
   const { data: resourcesData, isValidating: loadingResourcesTab } = useSWR(
     resourcesKey,
     portalFetcher,
-    { shouldRetryOnError: false, revalidateOnFocus: false }
+    { shouldRetryOnError: false, revalidateOnFocus: false, revalidateIfStale: false }
   )
   const { data: reportsData, isValidating: loadingReportsTab } = useSWR(
     reportsKey,
     portalFetcher,
-    { shouldRetryOnError: false, revalidateOnFocus: false }
+    { shouldRetryOnError: false, revalidateOnFocus: false, revalidateIfStale: false }
   )
 
   const tasks = safeArray(progressData?.tasks)

@@ -5,14 +5,12 @@ import { safeArray } from '@/lib/safe'
 
 export const runtime = 'nodejs';
 
-function shapeTask(task, service, clientMap) {
+function shapeTask(task, clientMap) {
     return {
         id: task.id,
         title: task.title,
         status: task.status,
-        client_id: task.client_id,
-        client_name: clientMap[task.client_id] || 'Unknown',
-        service
+        client_name: clientMap[task.client_id] || 'Unknown'
     }
 }
 
@@ -44,9 +42,9 @@ export async function GET(request, { params }) {
 
         return handleCORS(NextResponse.json({
             services: {
-                seo: safeArray(seoTasks).map((t) => shapeTask(t, 'seo', clientMap)),
-                email: safeArray(emailTasks).map((t) => shapeTask(t, 'email', clientMap)),
-                paid: safeArray(paidTasks).map((t) => shapeTask(t, 'paid', clientMap)),
+                seo: safeArray(seoTasks).map((t) => shapeTask(t, clientMap)),
+                email: safeArray(emailTasks).map((t) => shapeTask(t, clientMap)),
+                paid: safeArray(paidTasks).map((t) => shapeTask(t, clientMap)),
             }
         }))
     })

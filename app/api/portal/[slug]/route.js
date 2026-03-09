@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { connectToMongo } from '@/lib/db/mongodb'
 import { handleCORS, withErrorLogging } from '@/lib/middleware/api-utils'
 import { safeArray, safeURL } from '@/lib/safe'
+import bcrypt from 'bcryptjs'
 
 export const runtime = 'nodejs';
 
@@ -22,7 +23,17 @@ export async function GET(request, { params }) {
 
         if (hasPassword) {
             const authHeader = request.headers.get('X-Portal-Password')
-            if (!authHeader || authHeader !== pp) {
+            let valid = false
+            if (authHeader) {
+                try {
+                    // Primary path: bcrypt hash in DB
+                    valid = await bcrypt.compare(authHeader, pp)
+                } catch {
+                    // Legacy fallback for old plaintext records
+                    valid = authHeader === pp
+                }
+            }
+            if (!valid) {
                 return handleCORS(NextResponse.json({
                     error: 'Password required',
                     has_password: true,

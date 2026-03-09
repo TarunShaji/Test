@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Card, CardContent } from '@/components/ui/card'
 import { Plus, ExternalLink, Trash2 } from 'lucide-react'
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog'
+import { Pagination } from '@/components/shared/Pagination'
 
 const REPORT_TYPES = ['Monthly SEO Report', 'Weekly Update', 'Audit Report', 'Ad Performance', 'Custom']
 
@@ -25,27 +26,37 @@ function ReportsPageContent() {
   const [reports, setReports] = useState([])
   const [clients, setClients] = useState([])
   const [filterClient, setFilterClient] = useState('')
+  const [page, setPage] = useState(1)
+  const [pagination, setPagination] = useState({ total: 0, page: 1, totalPages: 1 })
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [form, setForm] = useState({ title: '', client_id: '', report_type: 'Monthly SEO Report', report_url: '', report_date: '', notes: '' })
   const [confirmConfig, setConfirmConfig] = useState(null)
 
   const loadData = async () => {
-    const params = filterClient && filterClient !== 'all' ? `?client_id=${filterClient}` : ''
-    const [rRes, cRes] = await Promise.all([apiFetch(`/api/reports${params}`), apiFetch('/api/clients?lite=1')])
+    setLoading(true)
+    const params = new URLSearchParams()
+    params.set('page', String(page))
+    params.set('limit', '50')
+    if (filterClient && filterClient !== 'all') params.set('client_id', filterClient)
+    const [rRes, cRes] = await Promise.all([apiFetch(`/api/reports?${params.toString()}`), apiFetch('/api/clients?lite=1')])
     const [r, c] = await Promise.all([rRes.json(), cRes.json()])
-    setReports(r || [])
+    setReports(safeArray(r?.data))
+    setPagination({
+      total: r?.total || 0,
+      page: r?.page || 1,
+      totalPages: r?.totalPages || 1
+    })
     setClients(c || [])
     setLoading(false)
   }
 
-  useEffect(() => { loadData() }, [filterClient])
+  useEffect(() => { loadData() }, [filterClient, page])
 
   const addReport = async (e) => {
     e.preventDefault()
     const res = await apiFetch('/api/reports', { method: 'POST', body: JSON.stringify(form) })
-    const report = await res.json()
-    setReports(rs => [report, ...rs])
+    if (res.ok) loadData()
     setShowAdd(false)
     setForm({ title: '', client_id: '', report_type: 'Monthly SEO Report', report_url: '', report_date: '', notes: '' })
   }
@@ -56,7 +67,7 @@ function ReportsPageContent() {
       description: 'This will permanently delete the report. This cannot be undone.',
       onConfirm: async () => {
         await apiFetch(`/api/reports/${id}`, { method: 'DELETE' })
-        setReports(rs => rs.filter(r => r.id !== id))
+        loadData()
       }
     })
   }
@@ -66,7 +77,7 @@ function ReportsPageContent() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Reports</h1>
-          <p className="text-gray-500 text-sm mt-1">{reports.length} reports</p>
+          <p className="text-gray-500 text-sm mt-1">{pagination.total} reports</p>
         </div>
         <Button onClick={() => setShowAdd(true)} className="gap-1" size="sm">
           <Plus className="w-4 h-4" /> Add Report
@@ -74,7 +85,7 @@ function ReportsPageContent() {
       </div>
 
       <div className="mb-4">
-        <Select value={filterClient} onValueChange={setFilterClient}>
+        <Select value={filterClient} onValueChange={(v) => { setFilterClient(v); setPage(1) }}>
           <SelectTrigger className="w-48 h-8 text-sm"><SelectValue placeholder="All Clients" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Clients</SelectItem>
@@ -114,6 +125,12 @@ function ReportsPageContent() {
           ))}
         </div>
       )}
+      <Pagination
+        total={pagination.total}
+        page={pagination.page}
+        totalPages={pagination.totalPages}
+        onPageChange={setPage}
+      />
 
       <Dialog open={showAdd} onOpenChange={setShowAdd}>
         <DialogContent>

@@ -6,7 +6,7 @@ import { apiFetch } from '@/lib/middleware/auth'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Plus, Trash2, RefreshCw, GripVertical, GripHorizontal, Search } from 'lucide-react'
+import { Plus, Trash2, RefreshCw, GripVertical, GripHorizontal, Search, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { safeJSON, safeArray } from '@/lib/safe'
 import { EditableCell } from '@/components/table/EditableCell'
@@ -58,11 +58,14 @@ function TasksPageContent() {
   const filterAssignee = searchParams.get('assigned_to') || 'all'
   const filterPriority = searchParams.get('priority') || 'all'
   const filterSearch = searchParams.get('search') || ''
+  const sortBy = searchParams.get('sort_by') || ''
+  const sortDir = searchParams.get('sort_dir') === 'desc' ? 'desc' : 'asc'
   const service = searchParams.get('service') || 'seo'
   const page = parseInt(searchParams.get('page')) || 1
 
   const [localSearch, setLocalSearch] = useState(filterSearch)
   const [columnOrder, setColumnOrder] = useState([])
+  const sortConfig = useMemo(() => ({ field: sortBy || null, direction: sortDir }), [sortBy, sortDir])
 
   const getServiceConfig = (srv) => {
     switch (srv) {
@@ -124,6 +127,8 @@ function TasksPageContent() {
 
     const params = new URLSearchParams(searchParams.toString())
     params.delete('service') // API doesn't need the service param, it's in the URL
+    params.delete('sort_by')
+    params.delete('sort_dir')
     if (!params.get('limit')) params.set('limit', '50')
 
     const [tasksRes, clientsRes, membersRes] = await Promise.all([
@@ -253,9 +258,54 @@ function TasksPageContent() {
 
   const allTasks = useMemo(() => safeArray(tasks), [tasks])
   const memberMap = useMemo(() => Object.fromEntries(safeArray(members).map(m => [m?.id, m?.name])), [members])
+  const clientMap = useMemo(() => Object.fromEntries(safeArray(clients).map(c => [c?.id, c?.name])), [clients])
   const anyFilter = useMemo(() => filterClient !== 'all' || filterStatus !== 'all' || filterCategory !== 'all' || filterAssignee !== 'all' || filterPriority !== 'all' || filterSearch.trim() !== '', [filterClient, filterStatus, filterCategory, filterAssignee, filterPriority, filterSearch])
 
-  const sorted = allTasks
+  const getDateValue = (value) => {
+    if (!value) return Number.NaN
+    if (value instanceof Date) return value.getTime()
+    const str = String(value).trim()
+    if (!str) return Number.NaN
+    const direct = Date.parse(str)
+    if (!Number.isNaN(direct)) return direct
+    const ddmmyyyy = str.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/)
+    if (ddmmyyyy) {
+      const day = Number(ddmmyyyy[1])
+      const month = Number(ddmmyyyy[2]) - 1
+      let year = Number(ddmmyyyy[3])
+      if (year < 100) year += 2000
+      return new Date(year, month, day).getTime()
+    }
+    return Number.NaN
+  }
+
+  const getSortableValue = (task, sortField) => {
+    if (!task || !sortField) return ''
+    if (sortField === 'client_name') return clientMap[task.client_id] || task.client_name || ''
+    if (sortField === 'assigned_name') return memberMap[task.assigned_to] || ''
+    if (sortField === 'eta_end' || sortField === 'campaign_live_date' || sortField === 'live_data') return getDateValue(task[sortField])
+    return task[sortField] ?? ''
+  }
+
+  const sorted = useMemo(() => {
+    if (!sortConfig.field) return allTasks
+    const factor = sortConfig.direction === 'asc' ? 1 : -1
+    return [...allTasks].sort((a, b) => {
+      const aVal = getSortableValue(a, sortConfig.field)
+      const bVal = getSortableValue(b, sortConfig.field)
+      const aNum = typeof aVal === 'number'
+      const bNum = typeof bVal === 'number'
+      if (aNum && bNum) {
+        const aNaN = Number.isNaN(aVal)
+        const bNaN = Number.isNaN(bVal)
+        if (aNaN && bNaN) return 0
+        if (aNaN) return 1
+        if (bNaN) return -1
+        return (aVal - bVal) * factor
+      }
+      return String(aVal).localeCompare(String(bVal), undefined, { sensitivity: 'base', numeric: true }) * factor
+    })
+  }, [allTasks, sortConfig, clientMap, memberMap])
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -263,6 +313,7 @@ function TasksPageContent() {
   )
 
   const handleRowDragEnd = async (event) => {
+    if (sortConfig.field) return
     const { active, over } = event
     if (!over) return
     if (active.id !== over.id) {
@@ -299,6 +350,12 @@ function TasksPageContent() {
     }
   }
 
+  const handleSort = (field) => {
+    if (!field) return
+    const nextDirection = sortConfig.field === field && sortConfig.direction === 'asc' ? 'desc' : 'asc'
+    updateQueryParams({ sort_by: field, sort_dir: nextDirection, page: 1 })
+  }
+
   const SortableHeader = ({ id, label, sortField: sField }) => {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: id || 'header' })
     const isSticky = id === 'title' || id === 'serial' || id === 'selection' || id === 'client'
@@ -321,9 +378,20 @@ function TasksPageContent() {
           <div {...attributes} {...listeners} className="cursor-grab hover:text-blue-500 flex-shrink-0">
             <GripHorizontal className="w-3 h-3" />
           </div>
-          <span className={`truncate ${sField ? 'cursor-pointer hover:text-gray-900' : ''}`} title={label}>
-            {label}
-          </span>
+          <button
+            type="button"
+            onClick={() => handleSort(sField)}
+            className={`truncate inline-flex items-center gap-1 ${sField ? 'cursor-pointer hover:text-gray-900' : 'cursor-default'}`}
+            title={label}
+            disabled={!sField}
+          >
+            <span className="truncate">{label}</span>
+            {sField && (
+              sortConfig.field === sField
+                ? (sortConfig.direction === 'asc' ? <ArrowUp className="w-3 h-3 flex-shrink-0" /> : <ArrowDown className="w-3 h-3 flex-shrink-0" />)
+                : <ArrowUpDown className="w-3 h-3 flex-shrink-0 text-gray-400" />
+            )}
+          </button>
         </div>
       </th>
     )
@@ -352,14 +420,16 @@ function TasksPageContent() {
               style={{ width: serviceConfig.widths[colId], minWidth: serviceConfig.widths[colId], ...stickyStyle }}>
               {colId === 'serial' && (
                 <div className="text-[10px] font-mono text-gray-400 text-center select-none">
-                  {allTasks.findIndex(t => t.id === task.id) + 1}
+                  {sorted.findIndex(t => t.id === task.id) + 1}
                 </div>
               )}
               {colId === 'selection' && (
                 <div className="flex items-center gap-3 px-1">
-                  <div {...attributes} {...listeners} className="cursor-grab text-gray-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <GripVertical className="w-3 h-3" />
-                  </div>
+                  {!sortConfig.field && (
+                    <div {...attributes} {...listeners} className="cursor-grab text-gray-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <GripVertical className="w-3 h-3" />
+                    </div>
+                  )}
                   <Checkbox checked={selected.includes(task.id)} onCheckedChange={() => toggleSelect(task.id)} />
                 </div>
               )}
@@ -440,7 +510,21 @@ function TasksPageContent() {
     campaign_live: 'Campaign Live', live_data: 'Live Data',
     client_approval: 'Client Approval', client_feedback: 'Client Feedback', actions: ''
   }
-  const columnSortFields = { client: 'client_name', title: 'title', status: 'status', priority: 'priority', eta: 'eta_end', campaign_live: 'campaign_live_date' }
+  const columnSortFields = {
+    client: 'client_name',
+    title: 'title',
+    category: 'category',
+    status: 'status',
+    priority: 'priority',
+    eta: 'eta_end',
+    assigned: 'assigned_name',
+    link: 'link_url',
+    internal_approval: 'internal_approval',
+    campaign_live: 'campaign_live_date',
+    live_data: 'live_data',
+    client_approval: 'client_approval',
+    client_feedback: 'client_feedback_note'
+  }
 
   return (
     <div className="p-6">

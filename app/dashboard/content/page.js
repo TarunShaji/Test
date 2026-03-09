@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { EditableCell } from '@/components/table/EditableCell'
 import { LinkCell } from '@/components/table/LinkCell'
-import { FileText, Plus, Trash2, Filter, Search, GripVertical, GripHorizontal } from 'lucide-react'
+import { FileText, Plus, Trash2, Filter, Search, GripVertical, GripHorizontal, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
 import { safeJSON, safeArray } from '@/lib/safe'
 import { Pagination } from '@/components/shared/Pagination'
 import { ClientSwitcher } from '@/components/shared/ClientSwitcher'
@@ -62,9 +62,13 @@ function ContentCalendarContent() {
   const filterClientApproval = searchParams.get('client_approval') || 'all'
   const filterPublished = searchParams.get('published') || 'all'
   const filterSearch = searchParams.get('search') || ''
+  const sortBy = searchParams.get('sort_by') || ''
+  const sortDir = searchParams.get('sort_dir') === 'desc' ? 'desc' : 'asc'
   const page = parseInt(searchParams.get('page')) || 1
 
   const queryParams = new URLSearchParams(searchParams.toString())
+  queryParams.delete('sort_by')
+  queryParams.delete('sort_dir')
   if (!queryParams.get('limit')) queryParams.set('limit', '50')
 
   const { data: contentResponse, mutate: mutateContent, error: contentErr } = useSWR(`/api/content?${queryParams.toString()}`, swrFetcher)
@@ -84,6 +88,7 @@ function ContentCalendarContent() {
   const [localSearch, setLocalSearch] = useState(filterSearch)
   const [showFilters, setShowFilters] = useState(true)
   const [columnOrder, setColumnOrder] = useState([])
+  const sortConfig = useMemo(() => ({ field: sortBy || null, direction: sortDir }), [sortBy, sortDir])
   const [newContent, setNewContent] = useState({ blog_title: '', client_id: '' })
   const [addingContent, setAddingContent] = useState(false)
   const [confirmConfig, setConfirmConfig] = useState(null)
@@ -204,9 +209,51 @@ function ContentCalendarContent() {
     })
   }
 
-  const filtered = content
-
   const clientMap = useMemo(() => Object.fromEntries(clients.map(c => [c?.id, c?.name])), [clients])
+  const getDateValue = (value) => {
+    if (!value) return Number.NaN
+    if (value instanceof Date) return value.getTime()
+    const str = String(value).trim()
+    if (!str) return Number.NaN
+    const direct = Date.parse(str)
+    if (!Number.isNaN(direct)) return direct
+    const ddmmyyyy = str.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/)
+    if (ddmmyyyy) {
+      const day = Number(ddmmyyyy[1])
+      const month = Number(ddmmyyyy[2]) - 1
+      let year = Number(ddmmyyyy[3])
+      if (year < 100) year += 2000
+      return new Date(year, month, day).getTime()
+    }
+    return Number.NaN
+  }
+
+  const getSortableValue = (item, sortField) => {
+    if (!item || !sortField) return ''
+    if (sortField === 'client_name') return clientMap[item.client_id] || ''
+    if (['required_by', 'published_date', 'blog_approval_date', 'date_sent_for_approval'].includes(sortField)) return getDateValue(item[sortField])
+    return item[sortField] ?? ''
+  }
+
+  const filtered = useMemo(() => {
+    if (!sortConfig.field) return content
+    const factor = sortConfig.direction === 'asc' ? 1 : -1
+    return [...content].sort((a, b) => {
+      const aVal = getSortableValue(a, sortConfig.field)
+      const bVal = getSortableValue(b, sortConfig.field)
+      const aNum = typeof aVal === 'number'
+      const bNum = typeof bVal === 'number'
+      if (aNum && bNum) {
+        const aNaN = Number.isNaN(aVal)
+        const bNaN = Number.isNaN(bVal)
+        if (aNaN && bNaN) return 0
+        if (aNaN) return 1
+        if (bNaN) return -1
+        return (aVal - bVal) * factor
+      }
+      return String(aVal).localeCompare(String(bVal), undefined, { sensitivity: 'base', numeric: true }) * factor
+    })
+  }, [content, sortConfig, clientMap])
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -214,6 +261,7 @@ function ContentCalendarContent() {
   )
 
   const handleRowDragEnd = async (event) => {
+    if (sortConfig.field) return
     const { active, over } = event
     if (!over) return
     if (active.id !== over.id) {
@@ -250,7 +298,13 @@ function ContentCalendarContent() {
     }
   }
 
-  const SortableHeader = ({ id, label }) => {
+  const handleSort = (field) => {
+    if (!field) return
+    const nextDirection = sortConfig.field === field && sortConfig.direction === 'asc' ? 'desc' : 'asc'
+    updateQueryParams({ sort_by: field, sort_dir: nextDirection, page: 1 })
+  }
+
+  const SortableHeader = ({ id, label, sortField }) => {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: id || 'header' })
     const isSticky = id === 'title'
     const style = {
@@ -267,7 +321,20 @@ function ContentCalendarContent() {
           <div {...attributes} {...listeners} className="cursor-grab hover:text-blue-500 flex-shrink-0">
             <GripHorizontal className="w-3 h-3" />
           </div>
-          <span className="truncate" title={label}>{label}</span>
+          <button
+            type="button"
+            onClick={() => handleSort(sortField)}
+            className={`truncate inline-flex items-center gap-1 ${sortField ? 'cursor-pointer hover:text-gray-900' : 'cursor-default'}`}
+            title={label}
+            disabled={!sortField}
+          >
+            <span className="truncate">{label}</span>
+            {sortField && (
+              sortConfig.field === sortField
+                ? (sortConfig.direction === 'asc' ? <ArrowUp className="w-3 h-3 flex-shrink-0" /> : <ArrowDown className="w-3 h-3 flex-shrink-0" />)
+                : <ArrowUpDown className="w-3 h-3 flex-shrink-0 text-gray-400" />
+            )}
+          </button>
         </div>
       </th>
     )
@@ -292,9 +359,11 @@ function ContentCalendarContent() {
               style={{ width: CONTENT_COLUMN_WIDTHS[colId], minWidth: CONTENT_COLUMN_WIDTHS[colId], ...stickyStyle }}>
               {colId === 'client' && (
                 <div className="flex items-center gap-2">
-                  <div {...attributes} {...listeners} className="cursor-grab text-gray-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <GripVertical className="w-3 h-3" />
-                  </div>
+                  {!sortConfig.field && (
+                    <div {...attributes} {...listeners} className="cursor-grab text-gray-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <GripVertical className="w-3 h-3" />
+                    </div>
+                  )}
                   <Link href={`/dashboard/clients/${item?.client_id}`} className="text-xs text-blue-600 hover:underline font-medium">
                     {clients.find(c => c.id === item?.client_id)?.name || clientMap[item?.client_id] || 'Unknown'}
                   </Link>
@@ -387,6 +456,28 @@ function ContentCalendarContent() {
     date_sent: 'Sent For Appr.',
     blog_approval: 'Client Approval', approved_on: 'Approved On', blog_feedback: 'Feedback',
     link: 'Blog Link', published: 'Published', actions: ''
+  }
+  const columnSortFields = {
+    client: 'client_name',
+    week: 'week',
+    title: 'blog_title',
+    primary_keyword: 'primary_keyword',
+    secondary_keyword: 'secondary_keywords',
+    writer: 'writer',
+    outline: 'outline_link',
+    intern_status: 'intern_status',
+    search_volume: 'search_volume',
+    topic_approval: 'topic_approval_status',
+    blog_status: 'blog_status',
+    blog_doc: 'blog_doc_link',
+    blog_internal_approval: 'blog_internal_approval',
+    date_sent: 'date_sent_for_approval',
+    blog_approval: 'blog_approval_status',
+    approved_on: 'blog_approval_date',
+    blog_feedback: 'blog_client_feedback_note',
+    link: 'blog_link',
+    required_by: 'required_by',
+    published: 'published_date'
   }
 
   return (
@@ -550,7 +641,7 @@ function ContentCalendarContent() {
                       #
                     </th>
                     {columnOrder.map(colId => (
-                      <SortableHeader key={colId} id={colId} label={columnLabels[colId] || colId} />
+                      <SortableHeader key={colId} id={colId} label={columnLabels[colId] || colId} sortField={columnSortFields[colId]} />
                     ))}
                   </tr>
                 </SortableContext>
