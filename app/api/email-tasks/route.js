@@ -27,6 +27,7 @@ export async function GET(request) {
         const status = url.searchParams.get('status')
         const assignedTo = url.searchParams.get('assigned_to')
         const search = url.searchParams.get('search')
+        const enrich = url.searchParams.get('enrich') !== '0'
 
         // Pagination Params
         const page = parseInt(url.searchParams.get('page')) || 1
@@ -47,27 +48,34 @@ export async function GET(request) {
         }
 
         const collection = database.collection('email_tasks')
-        const total = await collection.countDocuments(query)
+        const [total, tasks] = await Promise.all([
+            collection.countDocuments(query),
+            collection.find(query)
+                .sort({ position: 1, created_at: -1 })
+                .skip(skip)
+                .limit(limit)
+                .toArray()
+        ])
         const totalPages = Math.ceil(total / limit)
-
-        const tasks = await collection.find(query)
-            .sort({ position: 1, created_at: -1 })
-            .skip(skip)
-            .limit(limit)
-            .toArray()
 
         const cleanTasks = safeArray(tasks).map(({ _id, ...t }) => t)
 
-        // Enrich with client names and assignee names
+        if (!enrich) {
+            return handleCORS(NextResponse.json({
+                data: cleanTasks,
+                total,
+                page,
+                totalPages
+            }))
+        }
+
+        // Enrich with client names and assignee names only when requested.
         const clientIds = [...new Set(cleanTasks.map(t => t.client_id))]
         const assigneeIds = [...new Set(cleanTasks.map(t => t.assigned_to).filter(Boolean))]
-
-        const clients = clientIds.length > 0 ? await database.collection('clients').find({ id: { $in: clientIds } }).toArray() : []
-        const members = assigneeIds.length > 0 ? await database.collection('team_members').find({ id: { $in: assigneeIds } }).toArray() : []
-
+        const clients = clientIds.length > 0 ? await database.collection('clients').find({ id: { $in: clientIds } }, { projection: { _id: 0, id: 1, name: 1 } }).toArray() : []
+        const members = assigneeIds.length > 0 ? await database.collection('team_members').find({ id: { $in: assigneeIds } }, { projection: { _id: 0, id: 1, name: 1 } }).toArray() : []
         const clientMap = Object.fromEntries(safeArray(clients).map(c => [c.id, c.name]))
         const memberMap = Object.fromEntries(safeArray(members).map(m => [m.id, m.name]))
-
         const enriched = cleanTasks.map(t => ({
             ...t,
             client_name: clientMap[t.client_id] || 'Unknown',

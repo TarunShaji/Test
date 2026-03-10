@@ -120,6 +120,22 @@ function TasksPageContent() {
     }
   }, [service, serviceConfig.columns])
 
+  const loadLookups = async () => {
+    try {
+      const [clientsRes, membersRes] = await Promise.all([
+        apiFetch('/api/clients?lite=1'),
+        apiFetch('/api/team'),
+      ])
+      const [clientsData, membersData] = await Promise.all([
+        clientsRes.json(), membersRes.json(),
+      ])
+      setClients(safeArray(clientsData))
+      setMembers(safeArray(membersData))
+    } catch (e) {
+      console.error('Failed to load lookup data', e)
+    }
+  }
+
   const loadData = async () => {
     setLoading(true)
     setTasks([]) // Clear stale data immediate
@@ -129,16 +145,11 @@ function TasksPageContent() {
     params.delete('service') // API doesn't need the service param, it's in the URL
     params.delete('sort_by')
     params.delete('sort_dir')
+    params.set('enrich', '0')
     if (!params.get('limit')) params.set('limit', '50')
 
-    const [tasksRes, clientsRes, membersRes] = await Promise.all([
-      apiFetch(`${serviceConfig.endpoint}?${params.toString()}`),
-      apiFetch('/api/clients?lite=1'),
-      apiFetch('/api/team'),
-    ])
-    const [tasksData, clientsData, membersData] = await Promise.all([
-      tasksRes.json(), clientsRes.json(), membersRes.json(),
-    ])
+    const tasksRes = await apiFetch(`${serviceConfig.endpoint}?${params.toString()}`)
+    const tasksData = await tasksRes.json()
 
     setTasks(safeArray(tasksData.data))
     setPagination({
@@ -146,11 +157,10 @@ function TasksPageContent() {
       page: tasksData.page || 1,
       totalPages: tasksData.totalPages || 1
     })
-    setClients(safeArray(clientsData))
-    setMembers(safeArray(membersData))
     setLoading(false)
   }
 
+  useEffect(() => { loadLookups() }, [])
   useEffect(() => { loadData() }, [searchParams, serviceConfig.endpoint])
 
   useEffect(() => {

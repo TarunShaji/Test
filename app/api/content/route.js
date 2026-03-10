@@ -24,6 +24,7 @@ export async function GET(request) {
         const clientApproval = url.searchParams.get('client_approval')
         const published = url.searchParams.get('published') // 'yes' or 'no'
         const search = url.searchParams.get('search')
+        const enrich = url.searchParams.get('enrich') !== '0'
 
         // Pagination Params
         const page = parseInt(url.searchParams.get('page')) || 1
@@ -45,34 +46,42 @@ export async function GET(request) {
         }
 
         const collection = database.collection('content_items')
-        const total = await collection.countDocuments(query)
-        const totalPages = Math.ceil(total / limit)
 
-        // Calculate stats for the current filter (but without pagination)
-        const statsQuery = { ...query }
-        const stats = await collection.aggregate([
-            { $match: statsQuery },
-            { $group: { _id: "$blog_status", count: { $sum: 1 } } }
+        // Single aggregation pipeline with $facet to compute count, stats, and paginated
+        // data in one DB round-trip instead of 3 sequential queries.
+        const sortStage = { $sort: { position: 1, created_at: -1 } }
+        const [facetResult] = await collection.aggregate([
+            { $match: query },
+            {
+                $facet: {
+                    total: [{ $count: 'n' }],
+                    stats: [{ $group: { _id: '$blog_status', count: { $sum: 1 } } }],
+                    page: [sortStage, { $skip: skip }, { $limit: limit }]
+                }
+            }
         ]).toArray()
 
-        const statsMap = Object.fromEntries(stats.map(s => [s._id, s.count]))
-
-        const content = await collection.find(query)
-            .sort({ position: 1, created_at: -1 })
-            .skip(skip)
-            .limit(limit)
-            .toArray()
+        const total = facetResult?.total?.[0]?.n || 0
+        const totalPages = Math.ceil(total / limit)
+        const statsArr = facetResult?.stats || []
+        const statsMap = Object.fromEntries(statsArr.map(s => [s._id, s.count]))
+        const content = facetResult?.page || []
 
         const clean = safeArray(content).map(({ _id, ...c }) => c)
 
-        // Enrich with client names
-        const clientIds = [...new Set(clean.map(c => c.client_id))]
-        const clients = clientIds.length > 0 ? await database.collection('clients').find({ id: { $in: clientIds } }).toArray() : []
-        const clientMap = Object.fromEntries(safeArray(clients).map(c => [c.id, c.name]))
-        const enriched = clean.map(c => ({ ...c, client_name: clientMap[c.client_id] || 'Unknown' }))
+        const data = enrich
+            ? await (async () => {
+                const clientIds = [...new Set(clean.map(c => c.client_id))]
+                const clients = clientIds.length > 0
+                    ? await database.collection('clients').find({ id: { $in: clientIds } }, { projection: { _id: 0, id: 1, name: 1 } }).toArray()
+                    : []
+                const clientMap = Object.fromEntries(safeArray(clients).map(c => [c.id, c.name]))
+                return clean.map(c => ({ ...c, client_name: clientMap[c.client_id] || 'Unknown' }))
+            })()
+            : clean
 
         return handleCORS(NextResponse.json({
-            data: enriched,
+            data,
             total,
             page,
             totalPages,

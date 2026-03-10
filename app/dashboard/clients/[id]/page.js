@@ -122,6 +122,7 @@ function ClientDetailPageContent() {
   if (tSearch) taskParams.set('search', tSearch)
   taskParams.set('page', tPage.toString())
   taskParams.set('limit', '50')
+  taskParams.set('enrich', '0')
 
   const contentParams = new URLSearchParams()
   contentParams.set('client_id', id)
@@ -135,6 +136,7 @@ function ClientDetailPageContent() {
   if (cSearch) contentParams.set('search', cSearch)
   contentParams.set('page', cPage.toString())
   contentParams.set('limit', '50')
+  contentParams.set('enrich', '0')
 
   const { data: client, mutate: mutateClient, error: clientErr } = useSWR(id ? `/api/clients/${id}` : null, swrFetcher)
   const { data: tasks, mutate: mutateTasks } = useSWR(id ? `${serviceConfig.endpoint}?${taskParams.toString()}` : null, swrFetcher)

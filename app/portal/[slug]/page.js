@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Card, CardContent } from '@/components/ui/card'
@@ -344,8 +344,14 @@ export default function ClientPortalPage() {
     }
   }, [swrErr, portalPassword])
 
+  // Only set the default service once — on first data load.
+  // Without the ref guard, this re-runs every time progressData changes (i.e. on every
+  // service switch refetch), resetting the user's selection back to the client default.
+  const serviceInitialized = useRef(false)
   useEffect(() => {
+    if (serviceInitialized.current) return
     if (client?.service_type) {
+      serviceInitialized.current = true
       const srv = client.service_type.toLowerCase()
       if (srv.includes('email')) setPortalService('email')
       else if (srv.includes('paid')) setPortalService('paid')

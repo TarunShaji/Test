@@ -47,36 +47,56 @@ export async function GET(request, { params }) {
             response.client = clientData
         }
 
+        // Build parallel fetch promises for all requested sections
+        const fetchPromises = {}
+
         if (include.has('tasks')) {
-            let allTasks = []
-            if (service === 'seo' || service === 'all') {
-                const seoTasks = await database.collection('tasks').find({ client_id: clientData.id }).sort({ category: 1, created_at: 1 }).toArray()
-                allTasks = allTasks.concat(safeArray(seoTasks).map(({ _id, ...t }) => ({ ...t, service: 'seo' })))
-            }
-            if (service === 'email' || service === 'all') {
-                const emailTasks = await database.collection('email_tasks').find({ client_id: clientData.id }).sort({ created_at: 1 }).toArray()
-                allTasks = allTasks.concat(safeArray(emailTasks).map(({ _id, ...t }) => ({ ...t, service: 'email' })))
-            }
-            if (service === 'paid' || service === 'all') {
-                const paidTasks = await database.collection('paid_tasks').find({ client_id: clientData.id }).sort({ created_at: 1 }).toArray()
-                allTasks = allTasks.concat(safeArray(paidTasks).map(({ _id, ...t }) => ({ ...t, service: 'paid' })))
-            }
-            response.tasks = allTasks
+            // All 3 service collections in parallel
+            fetchPromises.seoTasks = (service === 'seo' || service === 'all')
+                ? database.collection('tasks').find({ client_id: clientData.id }).sort({ category: 1, created_at: 1 }).toArray()
+                : Promise.resolve([])
+            fetchPromises.emailTasks = (service === 'email' || service === 'all')
+                ? database.collection('email_tasks').find({ client_id: clientData.id }).sort({ created_at: 1 }).toArray()
+                : Promise.resolve([])
+            fetchPromises.paidTasks = (service === 'paid' || service === 'all')
+                ? database.collection('paid_tasks').find({ client_id: clientData.id }).sort({ created_at: 1 }).toArray()
+                : Promise.resolve([])
         }
 
         if (include.has('reports')) {
-            const reports = await database.collection('reports').find({ client_id: clientData.id }).sort({ report_date: -1 }).toArray()
-            response.reports = safeArray(reports).map(({ _id, ...r }) => r)
+            fetchPromises.reports = database.collection('reports').find({ client_id: clientData.id }).sort({ report_date: -1 }).toArray()
         }
 
         if (include.has('content')) {
-            const contentItems = await database.collection('content_items').find({ client_id: clientData.id }).sort({ week: 1, created_at: 1 }).toArray()
-            response.content = safeArray(contentItems).map(({ _id, ...c }) => c)
+            fetchPromises.content = database.collection('content_items').find({ client_id: clientData.id }).sort({ week: 1, created_at: 1 }).toArray()
         }
 
         if (include.has('resources')) {
-            const resources = await database.collection('client_resources').find({ client_id: clientData.id }).sort({ created_at: -1 }).toArray()
-            response.resources = safeArray(resources).map(({ _id, ...r }) => r)
+            fetchPromises.resources = database.collection('client_resources').find({ client_id: clientData.id }).sort({ created_at: -1 }).toArray()
+        }
+
+        // Execute all promises in parallel
+        const keys = Object.keys(fetchPromises)
+        const results = await Promise.all(keys.map(k => fetchPromises[k]))
+        const resolved = Object.fromEntries(keys.map((k, i) => [k, results[i]]))
+
+        if (include.has('tasks')) {
+            const seoTasks = safeArray(resolved.seoTasks).map(({ _id, ...t }) => ({ ...t, service: 'seo' }))
+            const emailTasks = safeArray(resolved.emailTasks).map(({ _id, ...t }) => ({ ...t, service: 'email' }))
+            const paidTasks = safeArray(resolved.paidTasks).map(({ _id, ...t }) => ({ ...t, service: 'paid' }))
+            response.tasks = [...seoTasks, ...emailTasks, ...paidTasks]
+        }
+
+        if (include.has('reports')) {
+            response.reports = safeArray(resolved.reports).map(({ _id, ...r }) => r)
+        }
+
+        if (include.has('content')) {
+            response.content = safeArray(resolved.content).map(({ _id, ...c }) => c)
+        }
+
+        if (include.has('resources')) {
+            response.resources = safeArray(resolved.resources).map(({ _id, ...r }) => r)
         }
 
         return handleCORS(NextResponse.json(response))

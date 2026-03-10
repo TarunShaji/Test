@@ -33,24 +33,35 @@ function ReportsPageContent() {
   const [form, setForm] = useState({ title: '', client_id: '', report_type: 'Monthly SEO Report', report_url: '', report_date: '', notes: '' })
   const [confirmConfig, setConfirmConfig] = useState(null)
 
+  const loadClients = async () => {
+    try {
+      const cRes = await apiFetch('/api/clients?lite=1')
+      const c = await cRes.json()
+      setClients(safeArray(c))
+    } catch (e) {
+      console.error('Failed to load clients', e)
+      setClients([])
+    }
+  }
+
   const loadData = async () => {
     setLoading(true)
     const params = new URLSearchParams()
     params.set('page', String(page))
     params.set('limit', '50')
     if (filterClient && filterClient !== 'all') params.set('client_id', filterClient)
-    const [rRes, cRes] = await Promise.all([apiFetch(`/api/reports?${params.toString()}`), apiFetch('/api/clients?lite=1')])
-    const [r, c] = await Promise.all([rRes.json(), cRes.json()])
+    const rRes = await apiFetch(`/api/reports?${params.toString()}`)
+    const r = await rRes.json()
     setReports(safeArray(r?.data))
     setPagination({
       total: r?.total || 0,
       page: r?.page || 1,
       totalPages: r?.totalPages || 1
     })
-    setClients(c || [])
     setLoading(false)
   }
 
+  useEffect(() => { loadClients() }, [])
   useEffect(() => { loadData() }, [filterClient, page])
 
   const addReport = async (e) => {

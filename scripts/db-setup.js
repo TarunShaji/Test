@@ -18,6 +18,8 @@ async function applyIndexes() {
         await db.collection('tasks').createIndex({ assigned_to: 1 });
         await db.collection('tasks').createIndex({ client_id: 1, status: 1 });
         await db.collection('tasks').createIndex({ client_id: 1, position: 1, created_at: -1 });
+        await db.collection('tasks').createIndex({ position: 1, created_at: -1 });
+        await db.collection('tasks').createIndex({ client_id: 1, category: 1, created_at: 1 });
         await db.collection('tasks').createIndex({ assigned_to: 1, status: 1 });
         await db.collection('tasks').createIndex({ client_link_visible: 1 });
         await db.collection('tasks').createIndex({ signature: 1 }, { unique: true, sparse: true });
@@ -31,6 +33,8 @@ async function applyIndexes() {
         await db.collection('email_tasks').createIndex({ assigned_to: 1 });
         await db.collection('email_tasks').createIndex({ client_id: 1, status: 1 });
         await db.collection('email_tasks').createIndex({ client_id: 1, position: 1, created_at: -1 });
+        await db.collection('email_tasks').createIndex({ position: 1, created_at: -1 });
+        await db.collection('email_tasks').createIndex({ client_id: 1, created_at: 1 });
         await db.collection('email_tasks').createIndex({ assigned_to: 1, status: 1 });
         await db.collection('email_tasks').createIndex({ id: 1 }, { unique: true });
 
@@ -41,6 +45,8 @@ async function applyIndexes() {
         await db.collection('paid_tasks').createIndex({ assigned_to: 1 });
         await db.collection('paid_tasks').createIndex({ client_id: 1, status: 1 });
         await db.collection('paid_tasks').createIndex({ client_id: 1, position: 1, created_at: -1 });
+        await db.collection('paid_tasks').createIndex({ position: 1, created_at: -1 });
+        await db.collection('paid_tasks').createIndex({ client_id: 1, created_at: 1 });
         await db.collection('paid_tasks').createIndex({ assigned_to: 1, status: 1 });
         await db.collection('paid_tasks').createIndex({ id: 1 }, { unique: true });
 
@@ -64,12 +70,14 @@ async function applyIndexes() {
         await db.collection('content_items').createIndex({ week: 1 });
         await db.collection('content_items').createIndex({ client_id: 1, position: 1, created_at: -1 });
         await db.collection('content_items').createIndex({ client_id: 1, week: 1, created_at: 1 });
+        await db.collection('content_items').createIndex({ position: 1, created_at: -1 });  // for "All Clients" unfiltered sort
         await db.collection('content_items').createIndex({ id: 1 }, { unique: true });
 
         // 4b. Reports Collection
         console.log('Indexing reports collection...');
         await db.collection('reports').createIndex({ id: 1 }, { unique: true });
         await db.collection('reports').createIndex({ client_id: 1, report_date: -1 });
+        await db.collection('reports').createIndex({ report_date: -1 });
 
         // 5. Client Resources Collection
         console.log('Indexing client_resources collection...');

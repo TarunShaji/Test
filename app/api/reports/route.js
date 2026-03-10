@@ -21,11 +21,25 @@ export async function GET(request) {
         const limit = Math.max(parseInt(limitParam || '50', 10), 1)
         const skip = (page - 1) * limit
 
-        const cursor = database.collection('reports').find(query).sort({ report_date: -1 })
-        const reports = usePagination
-            ? await cursor.skip(skip).limit(limit).toArray()
-            : await cursor.toArray()
+        const collection = database.collection('reports')
+
+        if (!usePagination) {
+            const reports = await collection.find(query).sort({ report_date: -1 }).toArray()
+            const clean = safeArray(reports).map(({ _id, ...r }) => r)
+            const clientIds = [...new Set(clean.map(r => r.client_id))]
+            const clients = clientIds.length > 0 ? await database.collection('clients').find({ id: { $in: clientIds } }).toArray() : []
+            const clientMap = Object.fromEntries(safeArray(clients).map(c => [c.id, c.name]))
+            const enriched = clean.map(r => ({ ...r, client_name: clientMap[r.client_id] || 'Unknown' }))
+            return handleCORS(NextResponse.json(enriched))
+        }
+
+        // Paginated — fetch data and total in parallel
+        const [reports, total] = await Promise.all([
+            collection.find(query).sort({ report_date: -1 }).skip(skip).limit(limit).toArray(),
+            collection.countDocuments(query)
+        ])
         const clean = safeArray(reports).map(({ _id, ...r }) => r)
+        const totalPages = Math.ceil(total / limit)
 
         // Enrich with client names
         const clientIds = [...new Set(clean.map(r => r.client_id))]
@@ -33,12 +47,6 @@ export async function GET(request) {
         const clientMap = Object.fromEntries(safeArray(clients).map(c => [c.id, c.name]))
 
         const enriched = clean.map(r => ({ ...r, client_name: clientMap[r.client_id] || 'Unknown' }))
-        if (!usePagination) {
-            return handleCORS(NextResponse.json(enriched))
-        }
-
-        const total = await database.collection('reports').countDocuments(query)
-        const totalPages = Math.ceil(total / limit)
         return handleCORS(NextResponse.json({
             data: enriched,
             total,

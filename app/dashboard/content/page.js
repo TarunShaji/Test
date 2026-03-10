@@ -69,6 +69,7 @@ function ContentCalendarContent() {
   const queryParams = new URLSearchParams(searchParams.toString())
   queryParams.delete('sort_by')
   queryParams.delete('sort_dir')
+  queryParams.set('enrich', '0')
   if (!queryParams.get('limit')) queryParams.set('limit', '50')
 
   const { data: contentResponse, mutate: mutateContent, error: contentErr } = useSWR(`/api/content?${queryParams.toString()}`, swrFetcher)
