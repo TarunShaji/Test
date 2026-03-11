@@ -271,7 +271,7 @@ export default function ClientPortalPage() {
   const [resourceForm, setResourceForm] = useState({ name: '', url: '' })
   const [addingResource, setAddingResource] = useState(false)
   const [portalService, setPortalService] = useState('seo')
-  const [activeTab, setActiveTab] = useState('progress')
+  const [activeTab, setActiveTab] = useState('tasks')
   const [taskSortCol, setTaskSortCol] = useState(null)
   const [taskSortDir, setTaskSortDir] = useState('asc')
 
@@ -486,17 +486,7 @@ export default function ClientPortalPage() {
   if (!progressData) return null
 
   // currentTasks already computed above as useMemo
-  const completed = currentTasks.filter(t => t?.status === 'Completed').length
-  const progress = currentTasks.length > 0 ? Math.round((completed / currentTasks.length) * 100) : 0
-  const approved = currentTasks.filter(t => t?.client_approval === 'Approved').length
-  const changes = currentTasks.filter(t => t?.client_approval === 'Required Changes').length
-  const pending = currentTasks.filter(t => !t?.client_approval || t?.client_approval === 'Pending Review').length
-
   const filteredTasks = currentTasks
-
-  const lastUpdated = currentTasks.length > 0
-    ? new Date(Math.max(...currentTasks.map(t => new Date(t?.updated_at || t?.created_at)))).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-    : null
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -517,41 +507,10 @@ export default function ClientPortalPage() {
       </header>
 
       <div className="max-w-5xl mx-auto px-6 py-8">
-        {/* Progress + stats */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          <div className="md:col-span-3 bg-white rounded-xl border border-gray-200 p-5">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-semibold text-gray-700">{portalService === 'email' ? 'Email' : portalService === 'paid' ? 'Paid Ads' : 'SEO'} Progress</h2>
-              <span className="text-sm text-gray-500">{completed}/{currentTasks.length} completed</span>
-            </div>
-            <div className="w-full bg-gray-100 rounded-full h-3">
-              <div className="h-3 rounded-full transition-all duration-500" style={{ width: `${progress}%`, background: 'linear-gradient(90deg,#3b82f6,#1d4ed8)' }} />
-            </div>
-            <div className="flex items-center justify-between mt-1.5">
-              <span className="text-xs text-gray-400">{progress}% complete</span>
-              {lastUpdated && <span className="text-xs text-gray-400">Updated {lastUpdated}</span>}
-            </div>
-          </div>
-          <div className="bg-white rounded-xl border border-gray-200 p-4 flex flex-col gap-2 justify-center">
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-gray-500">Approved</span>
-              <span className="font-bold text-green-600">{approved}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-gray-500">Changes Req.</span>
-              <span className="font-bold text-red-500">{changes}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-gray-500">Pending Review</span>
-              <span className="font-bold text-gray-400">{pending}</span>
-            </div>
-          </div>
-        </div>
-
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="mb-6">
-            <TabsTrigger value="progress" className="gap-1.5">
-              <CheckCircle2 className="w-4 h-4" /> Project Progress
+            <TabsTrigger value="tasks" className="gap-1.5">
+              <CheckCircle2 className="w-4 h-4" /> Timeline Tracker
             </TabsTrigger>
             <TabsTrigger value="content" className="gap-1.5">
               <FileText className="w-4 h-4" /> Content Calendar {content.length > 0 && `(${content.length})`}
@@ -564,8 +523,8 @@ export default function ClientPortalPage() {
             </TabsTrigger>
           </TabsList>
 
-          {/* ── Progress Tab ────────────────────────────────────────────── */}
-          <TabsContent value="progress">
+          {/* ── Timeline Tab ────────────────────────────────────────────── */}
+          <TabsContent value="tasks">
             {/* ── Service switcher — prominent pill buttons ── */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4 px-1">
               <div className="flex items-center gap-4">
@@ -618,7 +577,7 @@ export default function ClientPortalPage() {
                       >
                         {portalService === 'email' ? 'Campaign Live' : 'ETA End'} {taskSortCol === 'eta' ? (taskSortDir === 'asc' ? '↑' : '↓') : <span className="text-gray-300">↕</span>}
                       </th>
-                      <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500" style={{ width: TASK_COLUMN_WIDTHS.client_feedback || '200px' }}>Notes</th>
+                      <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500" style={{ width: TASK_COLUMN_WIDTHS.client_feedback || '200px' }}>Feedback</th>
                       <th
                         className="text-left px-4 py-2 text-xs font-semibold text-gray-500 cursor-pointer hover:text-gray-800 select-none"
                         style={{ width: TASK_COLUMN_WIDTHS.link }}
@@ -690,35 +649,35 @@ export default function ClientPortalPage() {
                 <p className="text-gray-400">No content calendar items yet.</p>
               </div>
             ) : (
-              <div className="bg-white rounded-xl border border-gray-200 overflow-auto">
-                <table className="w-full text-sm" style={{ minWidth: '1050px' }}>
+              <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
+                <table className="w-full text-sm" style={{ minWidth: '1660px' }}>
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-100">
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500" style={{ minWidth: 60 }}>Week</th>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500" style={{ minWidth: 200 }}>Blog Title</th>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Keyword</th>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Blog Status</th>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Blog Doc</th>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Topic Approval</th>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Blog Approval</th>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Your Feedback</th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500" style={{ minWidth: 340 }}>Blog Title</th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500" style={{ minWidth: 220 }}>Primary Keywords</th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 whitespace-nowrap" style={{ minWidth: 160 }}>Status</th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 whitespace-nowrap" style={{ minWidth: 150 }}>Doc</th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 whitespace-nowrap" style={{ minWidth: 130 }}>Published</th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 whitespace-nowrap" style={{ minWidth: 130 }}>Link</th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 whitespace-nowrap" style={{ minWidth: 180 }}>Topic Approval</th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 whitespace-nowrap" style={{ minWidth: 180 }}>Blog Approval</th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500" style={{ minWidth: 220 }}>Feedback</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
                     {safeArray(content).map(item => (
                       <tr key={item?.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 text-sm text-gray-600">{item?.week || '—'}</td>
                         <td className="px-4 py-3">
                           <p className="font-medium text-gray-800 text-sm">{item?.blog_title}</p>
                           {item?.blog_type && <p className="text-xs text-gray-400 mt-0.5 line-clamp-1">{item?.blog_type}</p>}
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-600">{item?.primary_keyword || '—'}</td>
-                        <td className="px-4 py-3">
+                        <td className="px-4 py-3 whitespace-nowrap">
                           <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${blogStatusColors[item?.blog_status] || 'bg-gray-100 text-gray-600 border-gray-200'}`}>
                             {item?.blog_status || 'Draft'}
                           </span>
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-4 py-3 whitespace-nowrap">
                           {item?.client_link_visible_blog && (item?.blog_doc_link || item?.blog_link) ? (
                             <a href={normalizeUrl(item.blog_doc_link || item.blog_link)} target="_blank" rel="noopener noreferrer"
                               className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white text-xs font-bold transition-all shadow-sm whitespace-nowrap">
@@ -730,7 +689,18 @@ export default function ClientPortalPage() {
                             </div>
                           )}
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{item?.published_date || '—'}</td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          {item?.blog_link ? (
+                            <a href={normalizeUrl(item.blog_link)} target="_blank" rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white text-xs font-bold transition-all shadow-sm whitespace-nowrap">
+                              <Link2 className="w-3.5 h-3.5" /> View
+                            </a>
+                          ) : (
+                            <span className="text-xs text-gray-300">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
                           <TopicApprovalButton
                             contentId={item?.id}
                             current={item?.topic_approval_status}
@@ -739,7 +709,7 @@ export default function ClientPortalPage() {
                             onUpdate={handleContentApprovalUpdate}
                           />
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-4 py-3 whitespace-nowrap">
                           <BlogApprovalButton
                             contentId={item?.id}
                             current={item?.blog_approval_status}

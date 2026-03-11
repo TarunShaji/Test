@@ -31,10 +31,28 @@ export async function GET(request) {
         ]))
 
         const aggregation = [
-            { $match: { assigned_to: { $in: memberIds } } },
+            {
+                $addFields: {
+                    assigned_to_list: {
+                        $cond: [
+                            { $isArray: '$assigned_to' },
+                            '$assigned_to',
+                            {
+                                $cond: [
+                                    { $and: [{ $ne: ['$assigned_to', null] }, { $ne: ['$assigned_to', ''] }] },
+                                    ['$assigned_to'],
+                                    []
+                                ]
+                            }
+                        ]
+                    }
+                }
+            },
+            { $unwind: '$assigned_to_list' },
+            { $match: { assigned_to_list: { $in: memberIds } } },
             {
                 $group: {
-                    _id: '$assigned_to',
+                    _id: '$assigned_to_list',
                     total: { $sum: 1 },
                     active: {
                         $sum: { $cond: [{ $ne: ['$status', 'Completed'] }, 1, 0] }

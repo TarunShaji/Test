@@ -23,6 +23,9 @@ export async function POST(request) {
         if (!member) {
             return handleCORS(NextResponse.json({ error: 'Invalid credentials' }, { status: 401 }))
         }
+        if (!member.password_hash) {
+            return handleCORS(NextResponse.json({ error: 'Account is not configured for password login' }, { status: 401 }))
+        }
 
         const valid = await bcrypt.compare(password, member.password_hash)
         if (!valid) {

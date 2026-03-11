@@ -4,6 +4,7 @@ import { connectToMongo } from '@/lib/db/mongodb'
 import { handleCORS, withAuth } from '@/lib/middleware/api-utils'
 import { validateBody } from '@/lib/middleware/validation'
 import { TeamMemberSchema } from '@/lib/db/schemas/team.schema'
+import bcrypt from 'bcryptjs'
 
 export const runtime = 'nodejs';
 
@@ -26,20 +27,34 @@ export async function POST(request) {
             return handleCORS(NextResponse.json(validation.error, { status: 400 }))
         }
 
-        const { name, email, role } = validation.data
+        const { name, email, role, password } = validation.data
+        if (!password) {
+            return handleCORS(NextResponse.json({
+                error: 'Password is required when creating a team member'
+            }, { status: 400 }))
+        }
+
+        const existing = await database.collection('team_members').findOne({ email: email.toLowerCase() })
+        if (existing) {
+            return handleCORS(NextResponse.json({ error: 'An account with this email already exists' }, { status: 409 }))
+        }
+
         const id = uuidv4()
+        const password_hash = await bcrypt.hash(password, 10)
 
         const member = {
             id,
             name,
-            email,
+            email: email.toLowerCase(),
+            password_hash,
             role: role || 'SEO',
             is_active: true,
             created_at: new Date()
         }
 
         await database.collection('team_members').insertOne(member)
-        return handleCORS(NextResponse.json(member))
+        const { password_hash: _, ...safeMember } = member
+        return handleCORS(NextResponse.json(safeMember))
     })
 }
 

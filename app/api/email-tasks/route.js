@@ -6,7 +6,7 @@ import { applyTaskTransition, assertTaskInvariant } from '@/lib/engine/lifecycle
 import { safeURL, safeArray } from '@/lib/safe'
 import { validateBody, rejectFields } from '@/lib/middleware/validation'
 import { EmailTaskSchema } from '@/lib/db/schemas/email.schema'
-import { getActiveTeamMemberIdSet, normalizeAssignedTo } from '@/lib/team/assignee'
+import { getActiveTeamMemberIdSet, normalizeAssignedTo, extractAssignedIds, buildAssignedToFilter } from '@/lib/team/assignee'
 
 export const runtime = 'nodejs';
 
@@ -42,7 +42,7 @@ export async function GET(request) {
                 query.status = status
             }
         }
-        if (assignedTo) query.assigned_to = assignedTo
+        if (assignedTo) Object.assign(query, buildAssignedToFilter(assignedTo))
         if (search) {
             query.title = { $regex: search, $options: 'i' }
         }
@@ -76,16 +76,21 @@ export async function GET(request) {
 
         // Enrich with client names and assignee names only when requested.
         const clientIds = [...new Set(cleanTasks.map(t => t.client_id))]
-        const assigneeIds = [...new Set(cleanTasks.map(t => t.assigned_to).filter(Boolean))]
+        const assigneeIds = [...new Set(cleanTasks.flatMap(t => extractAssignedIds(t.assigned_to)))]
         const clients = clientIds.length > 0 ? await database.collection('clients').find({ id: { $in: clientIds } }, { projection: { _id: 0, id: 1, name: 1 } }).toArray() : []
         const members = assigneeIds.length > 0 ? await database.collection('team_members').find({ id: { $in: assigneeIds } }, { projection: { _id: 0, id: 1, name: 1 } }).toArray() : []
         const clientMap = Object.fromEntries(safeArray(clients).map(c => [c.id, c.name]))
         const memberMap = Object.fromEntries(safeArray(members).map(m => [m.id, m.name]))
-        const enriched = cleanTasks.map(t => ({
-            ...t,
-            client_name: clientMap[t.client_id] || 'Unknown',
-            assigned_to_name: memberMap[t.assigned_to] || null
-        }))
+        const enriched = cleanTasks.map(t => {
+            const assignedIds = extractAssignedIds(t.assigned_to)
+            const assignedNames = assignedIds.map((id) => memberMap[id]).filter(Boolean)
+            return {
+                ...t,
+                client_name: clientMap[t.client_id] || 'Unknown',
+                assigned_to_name: assignedNames.join(', ') || null,
+                assigned_to_names: assignedNames
+            }
+        })
 
         return handleCORS(NextResponse.json({
             data: enriched,

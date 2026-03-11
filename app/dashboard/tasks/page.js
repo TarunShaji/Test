@@ -14,6 +14,8 @@ import { LinkCell } from '@/components/table/LinkCell'
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog'
 import { Pagination } from '@/components/shared/Pagination'
 import { ClientSwitcher } from '@/components/shared/ClientSwitcher'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { STATUSES, CATEGORIES, PRIORITIES, APPROVALS, INTERNAL_APPROVALS, statusColors, priorityColors, approvalColors, internalApprovalColors, TASK_COLUMN_WIDTHS, EMAIL_COLUMN_WIDTHS, PAID_COLUMN_WIDTHS } from '@/lib/constants'
 import {
   DndContext,
@@ -34,6 +36,92 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import { restrictToHorizontalAxis, restrictToVerticalAxis } from '@dnd-kit/modifiers'
 
+function CommentsModal({ value, onClose, onSave }) {
+  const [localComment, setLocalComment] = useState(value || '')
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Task Description / Comments</DialogTitle>
+          <DialogDescription>Add or edit a description for this task. Ctrl+Enter to save quickly.</DialogDescription>
+        </DialogHeader>
+        <textarea
+          autoFocus
+          value={localComment}
+          onChange={e => setLocalComment(e.target.value)}
+          rows={10}
+          placeholder="Write a description, notes, or comments about this task..."
+          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-300 resize-y"
+          onKeyDown={e => {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { onSave(localComment || null); onClose() }
+          }}
+        />
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={() => { onSave(localComment || null); onClose() }}>Save</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function toAssignedIds(raw) {
+  if (!raw) return []
+  if (Array.isArray(raw)) return raw.filter(Boolean)
+  if (typeof raw === 'string' && raw.trim() !== '') return [raw]
+  return []
+}
+
+function AssigneeCell({ task, members, memberMap, onSave }) {
+  const ids = toAssignedIds(task?.assigned_to)
+  const names = ids.map((id) => memberMap[id]).filter(Boolean)
+  const label = names.length ? names.join(', ') : 'Unassigned'
+
+  const setForMember = (memberId, checked) => {
+    const nextSet = new Set(ids)
+    if (checked) nextSet.add(memberId)
+    else nextSet.delete(memberId)
+    const next = [...nextSet]
+    if (next.length === 0) onSave(null)
+    else if (next.length === 1) onSave(next[0])
+    else onSave(next)
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button type="button" className="w-full text-left rounded px-1 py-0.5 min-h-[24px] hover:bg-blue-50 hover:ring-1 hover:ring-blue-200 transition-all">
+          <span className={`text-xs truncate block ${names.length ? 'text-gray-700' : 'text-gray-300'}`} title={label}>
+            {label}
+          </span>
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-56">
+        <DropdownMenuLabel className="text-xs">Assign Members</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuCheckboxItem
+          checked={ids.length === 0}
+          onCheckedChange={(checked) => { if (checked) onSave(null) }}
+          className="text-xs"
+        >
+          Unassigned
+        </DropdownMenuCheckboxItem>
+        <DropdownMenuSeparator />
+        {safeArray(members).map((m) => (
+          <DropdownMenuCheckboxItem
+            key={m?.id}
+            checked={ids.includes(m?.id)}
+            onCheckedChange={(checked) => setForMember(m?.id, checked)}
+            className="text-xs"
+          >
+            {m?.name}
+          </DropdownMenuCheckboxItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 
 function TasksPageContent() {
   const router = useRouter()
@@ -50,6 +138,7 @@ function TasksPageContent() {
   const [newTask, setNewTask] = useState({ title: '', client_id: '' })
   const [addingTask, setAddingTask] = useState(false)
   const [confirmConfig, setConfirmConfig] = useState(null)
+  const [commentsModal, setCommentsModal] = useState(null)
 
   // Sync state with URL
   const filterClient = searchParams.get('client_id') || 'all'
@@ -73,21 +162,21 @@ function TasksPageContent() {
         return {
           endpoint: '/api/email-tasks',
           label: 'Email Tasks',
-          columns: ['serial', 'selection', 'client', 'title', 'status', 'assigned', 'link', 'internal_approval', 'send_link', 'campaign_live', 'live_data', 'client_approval', 'client_feedback', 'comments', 'actions'],
+          columns: ['serial', 'selection', 'client', 'title', 'comments', 'status', 'assigned', 'link', 'internal_approval', 'send_link', 'campaign_live', 'live_data', 'client_approval', 'client_feedback', 'actions'],
           widths: EMAIL_COLUMN_WIDTHS
         }
       case 'paid':
         return {
           endpoint: '/api/paid-tasks',
           label: 'Paid Ads Tasks',
-          columns: ['serial', 'selection', 'client', 'title', 'status', 'assigned', 'link', 'internal_approval', 'send_link', 'client_approval', 'client_feedback', 'comments', 'actions'],
+          columns: ['serial', 'selection', 'client', 'title', 'comments', 'status', 'assigned', 'link', 'internal_approval', 'send_link', 'client_approval', 'client_feedback', 'actions'],
           widths: PAID_COLUMN_WIDTHS
         }
       default:
         return {
           endpoint: '/api/tasks',
           label: 'SEO Tasks',
-          columns: ['serial', 'selection', 'client', 'title', 'category', 'status', 'priority', 'eta', 'assigned', 'link', 'internal_approval', 'send_link', 'client_approval', 'client_feedback', 'comments', 'actions'],
+          columns: ['serial', 'selection', 'client', 'title', 'comments', 'category', 'status', 'priority', 'eta', 'assigned', 'link', 'internal_approval', 'send_link', 'client_approval', 'client_feedback', 'actions'],
           widths: TASK_COLUMN_WIDTHS
         }
     }
@@ -292,7 +381,7 @@ function TasksPageContent() {
   const getSortableValue = (task, sortField) => {
     if (!task || !sortField) return ''
     if (sortField === 'client_name') return clientMap[task.client_id] || task.client_name || ''
-    if (sortField === 'assigned_name') return memberMap[task.assigned_to] || ''
+    if (sortField === 'assigned_name') return toAssignedIds(task.assigned_to).map((id) => memberMap[id]).filter(Boolean).join(', ')
     if (sortField === 'eta_end' || sortField === 'campaign_live_date' || sortField === 'live_data') return getDateValue(task[sortField])
     return task[sortField] ?? ''
   }
@@ -454,14 +543,11 @@ function TasksPageContent() {
               {colId === 'priority' && <EditableCell value={task.priority} type="priority" options={PRIORITIES} onSave={v => updateTask(task.id, 'priority', v)} />}
               {colId === 'eta' && <EditableCell value={task.eta_end} type="date" onSave={v => updateTask(task.id, 'eta_end', v)} />}
               {colId === 'assigned' && (
-                <EditableCell
-                  value={memberMap[task.assigned_to] || ''}
-                  type="select"
-                  options={members.map(m => m.name)}
-                  onSave={v => {
-                    const member = members.find(m => m.name === v)
-                    updateTask(task.id, 'assigned_to', member?.id || null)
-                  }}
+                <AssigneeCell
+                  task={task}
+                  members={members}
+                  memberMap={memberMap}
+                  onSave={(value) => updateTask(task.id, 'assigned_to', value)}
                 />
               )}
               {colId === 'link' && <LinkCell value={task.link_url} onSave={v => updateTask(task.id, 'link_url', v)} />}
@@ -506,11 +592,7 @@ function TasksPageContent() {
                 <div
                   className="cursor-pointer px-1 py-0.5 rounded hover:bg-blue-50 hover:ring-1 hover:ring-blue-200 transition-all min-h-[24px] max-w-[200px] overflow-hidden"
                   title={task.comments || 'Click to add description'}
-                  onClick={() => {
-                    const current = task.comments || ''
-                    const next = prompt('Task description / comments:', current)
-                    if (next !== null && next !== current) updateTask(task.id, 'comments', next || null)
-                  }}
+                  onClick={() => setCommentsModal({ taskId: task.id, value: task.comments || '' })}
                 >
                   {task.comments
                     ? <span className="text-xs text-gray-600 line-clamp-2 block">{task.comments}</span>
@@ -739,6 +821,13 @@ function TasksPageContent() {
         />
       </div>
       <ConfirmDialog config={confirmConfig} onClose={() => setConfirmConfig(null)} />
+      {commentsModal && (
+        <CommentsModal
+          value={commentsModal.value}
+          onClose={() => setCommentsModal(null)}
+          onSave={(val) => updateTask(commentsModal.taskId, 'comments', val)}
+        />
+      )}
     </div>
   )
 }

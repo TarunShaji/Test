@@ -17,15 +17,34 @@ import { safeArray } from '@/lib/safe'
 /**
  * Inline member-select cell — shows member name, click to open dropdown, saves on select.
  */
-function MemberSelectCell({ value, members, onSave }) {
+function MemberSelectCell({ client, field, members, onSave }) {
   const [open, setOpen] = useState(false)
-
+  const value = client?.[field]
+  const isChurned = client?.is_churned === true
   const currentMember = members.find(m => m.id === value)
 
   const handleChange = (memberId) => {
     setOpen(false)
+    if (memberId === '__churned__') {
+      const ok = typeof window !== 'undefined'
+        ? window.confirm('Are you sure you want to mark this client as churned?')
+        : true
+      if (ok) onSave({ is_churned: true })
+      return
+    }
+
     const newVal = memberId === '__none__' ? null : memberId
-    if (newVal !== value) onSave(newVal)
+    const patch = { [field]: newVal }
+    if (field === 'npl_member_id') patch.is_churned = false
+    if (newVal !== value || field === 'npl_member_id') onSave(patch)
+  }
+
+  if (isChurned && field !== 'npl_member_id') {
+    return (
+      <span className="inline-flex items-center text-xs px-2 py-0.5 rounded bg-red-100 text-red-700 font-semibold">
+        Churned
+      </span>
+    )
   }
 
   if (open) {
@@ -43,6 +62,11 @@ function MemberSelectCell({ value, members, onSave }) {
           <SelectValue placeholder="—" />
         </SelectTrigger>
         <SelectContent onClick={e => e.stopPropagation()}>
+          {field === 'npl_member_id' && (
+            <SelectItem value="__churned__">
+              <span className="text-red-600 text-xs font-semibold">Churned</span>
+            </SelectItem>
+          )}
           <SelectItem value="__none__"><span className="text-gray-400 text-xs">— Unassigned</span></SelectItem>
           {members.map(m => (
             <SelectItem key={m.id} value={m.id} className="text-xs">
@@ -56,11 +80,16 @@ function MemberSelectCell({ value, members, onSave }) {
 
   return (
     <span
-      className={`cursor-pointer text-xs px-1.5 py-0.5 rounded transition-colors ${currentMember ? 'bg-blue-50 text-blue-700 hover:bg-blue-100' : 'text-gray-300 hover:bg-gray-100 hover:text-gray-500'}`}
+      className={`cursor-pointer text-xs px-1.5 py-0.5 rounded transition-colors ${isChurned
+        ? 'bg-red-100 text-red-700 hover:bg-red-200 font-semibold'
+        : currentMember
+          ? 'bg-blue-50 text-blue-700 hover:bg-blue-100'
+          : 'text-gray-300 hover:bg-gray-100 hover:text-gray-500'
+        }`}
       onClick={e => { e.stopPropagation(); setOpen(true) }}
       title="Click to assign member"
     >
-      {currentMember ? currentMember.name : '—'}
+      {isChurned ? 'Churned' : (currentMember ? currentMember.name : '—')}
     </span>
   )
 }
@@ -120,11 +149,19 @@ function DashboardPageContent() {
   const clientList = safeArray(clients)
   const members = safeArray(membersData)
 
-  const filtered = useMemo(() => clientList.filter(c =>
-    c?.name?.toLowerCase().includes(search.toLowerCase()) ||
-    c?.service_type?.toLowerCase().includes(search.toLowerCase()) ||
-    c?.email?.toLowerCase().includes(search.toLowerCase())
-  ), [clientList, search])
+  const filtered = useMemo(() =>
+    clientList
+      .filter(c =>
+        c?.name?.toLowerCase().includes(search.toLowerCase()) ||
+        c?.service_type?.toLowerCase().includes(search.toLowerCase()) ||
+        c?.email?.toLowerCase().includes(search.toLowerCase())
+      )
+      .sort((a, b) => {
+        const ac = a?.is_churned === true ? 1 : 0
+        const bc = b?.is_churned === true ? 1 : 0
+        return ac - bc
+      })
+    , [clientList, search])
 
   const handleAdd = async (e) => {
     e.preventDefault()
@@ -141,19 +178,19 @@ function DashboardPageContent() {
     setSaving(false)
   }
 
-  const updateClientField = async (clientId, field, value) => {
+  const updateClientFields = async (clientId, patch) => {
     // Optimistic local update
     mutate(
-      clientList.map(c => c.id === clientId ? { ...c, [field]: value } : c),
+      clientList.map(c => c.id === clientId ? { ...c, ...patch } : c),
       false
     )
     try {
       await apiFetch(`/api/clients/${clientId}`, {
         method: 'PUT',
-        body: JSON.stringify({ [field]: value })
+        body: JSON.stringify(patch)
       })
     } catch (e) {
-      console.error('updateClientField failed', e)
+      console.error('updateClientFields failed', e)
     }
     mutate()
   }
@@ -213,45 +250,48 @@ function DashboardPageContent() {
               ) : filtered.map(client => (
                 <tr
                   key={client.id}
-                  className="hover:bg-gray-50 cursor-pointer"
+                  className={`cursor-pointer ${client?.is_churned ? 'bg-red-50/40 hover:bg-red-50' : 'hover:bg-gray-50'}`}
                   onClick={() => router.push(`/dashboard/clients/${client.id}`)}
                 >
                   {/* Client Name */}
                   <td className="px-4 py-3">
-                    <div className="font-medium text-gray-900">{client.name}</div>
+                    <div className={`font-medium ${client?.is_churned ? 'text-red-700' : 'text-gray-900'}`}>{client.name}</div>
                   </td>
 
                   {/* Service Type */}
                   <td className="px-4 py-3">
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">
-                      {client.service_type}
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${client?.is_churned ? 'bg-red-100 text-red-700' : 'bg-blue-50 text-blue-700'}`}>
+                      {client?.is_churned ? 'Churned' : client.service_type}
                     </span>
                   </td>
 
                   {/* NPL — member dropdown */}
                   <td className="px-4 py-3">
                     <MemberSelectCell
-                      value={client.npl_member_id}
+                      client={client}
+                      field="npl_member_id"
                       members={members}
-                      onSave={v => updateClientField(client.id, 'npl_member_id', v)}
+                      onSave={patch => updateClientFields(client.id, patch)}
                     />
                   </td>
 
                   {/* TPL — member dropdown */}
                   <td className="px-4 py-3">
                     <MemberSelectCell
-                      value={client.tpl_member_id}
+                      client={client}
+                      field="tpl_member_id"
                       members={members}
-                      onSave={v => updateClientField(client.id, 'tpl_member_id', v)}
+                      onSave={patch => updateClientFields(client.id, patch)}
                     />
                   </td>
 
                   {/* CPL — member dropdown */}
                   <td className="px-4 py-3">
                     <MemberSelectCell
-                      value={client.cpl_member_id}
+                      client={client}
+                      field="cpl_member_id"
                       members={members}
-                      onSave={v => updateClientField(client.id, 'cpl_member_id', v)}
+                      onSave={patch => updateClientFields(client.id, patch)}
                     />
                   </td>
 
@@ -262,7 +302,7 @@ function DashboardPageContent() {
                   <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                     <EditableEmailCell
                       value={client.email}
-                      onSave={v => updateClientField(client.id, 'email', v)}
+                      onSave={v => updateClientFields(client.id, { email: v })}
                     />
                   </td>
 

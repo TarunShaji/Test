@@ -25,7 +25,7 @@ export async function POST(request) {
                 category: z.string().optional().nullable(),
                 priority: z.string().optional().nullable(),
                 link_url: z.string().optional().nullable(),
-                assigned_to: z.string().optional().nullable(),
+                assigned_to: z.union([z.string(), z.array(z.string())]).optional().nullable(),
                 eta_end: z.string().optional().nullable(),
                 eta_start: z.string().optional().nullable(),
                 duration_days: z.string().optional().nullable(),

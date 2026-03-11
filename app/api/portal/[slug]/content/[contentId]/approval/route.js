@@ -4,6 +4,7 @@ import { handleCORS, withErrorLogging } from '@/lib/middleware/api-utils'
 import { validateBody } from '@/lib/middleware/validation'
 import { PortalContentApprovalSchema } from '@/lib/db/schemas/portal.schema'
 import { applyContentTransition, assertContentInvariant } from '@/lib/engine/lifecycle'
+import bcrypt from 'bcryptjs'
 
 export const runtime = 'nodejs';
 
@@ -19,7 +20,16 @@ export async function PUT(request, { params }) {
         // Security check
         if (clientDoc.portal_password) {
             const authHeader = request.headers.get('X-Portal-Password')
-            if (!authHeader || authHeader !== clientDoc.portal_password) {
+            let valid = false
+            if (authHeader) {
+                try {
+                    valid = await bcrypt.compare(authHeader, clientDoc.portal_password)
+                } catch {
+                    // Legacy fallback for very old plaintext values.
+                    valid = authHeader === clientDoc.portal_password
+                }
+            }
+            if (!valid) {
                 return handleCORS(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }))
             }
         }

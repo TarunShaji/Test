@@ -3,6 +3,7 @@ import { connectToMongo } from '@/lib/db/mongodb'
 import { handleCORS, withAuth } from '@/lib/middleware/api-utils'
 import { validateBody } from '@/lib/middleware/validation'
 import { TeamMemberSchema } from '@/lib/db/schemas/team.schema'
+import bcrypt from 'bcryptjs'
 
 export async function PUT(request, { params }) {
     return withAuth(request, async () => {
@@ -17,6 +18,12 @@ export async function PUT(request, { params }) {
             }
 
             const updateData = validation.data
+            if (Object.prototype.hasOwnProperty.call(updateData, 'password')) {
+                if (updateData.password) {
+                    updateData.password_hash = await bcrypt.hash(updateData.password, 10)
+                }
+                delete updateData.password
+            }
             updateData.updated_at = new Date()
 
             const result = await database.collection('team_members').updateOne(

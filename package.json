@@ -8,7 +8,8 @@
         "start": "next start",
         "lint": "next lint",
         "setup:db": "node scripts/db-setup.js",
-        "db:truncate": "node scripts/db-reset-all.js"
+        "db:truncate": "node scripts/db-reset-all.js",
+        "migrate:content-duplicates": "node scripts/merge-content-duplicates.js"
     },
     "dependencies": {
         "@dnd-kit/core": "^6.3.1",

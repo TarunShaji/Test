@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { connectToMongo } from '@/lib/db/mongodb'
 import { handleCORS, withAuth } from '@/lib/middleware/api-utils'
 import { safeArray } from '@/lib/safe'
+import { buildAssignedToFilter } from '@/lib/team/assignee'
 
 export const runtime = 'nodejs';
 
@@ -24,7 +25,7 @@ export async function GET(request, { params }) {
             return handleCORS(NextResponse.json({ error: 'Team member not found' }, { status: 404 }))
         }
 
-        const query = { assigned_to: memberId }
+        const query = buildAssignedToFilter(memberId)
         const projection = { _id: 0, id: 1, title: 1, status: 1, client_id: 1 }
 
         const [seoTasks, emailTasks, paidTasks] = await Promise.all([
