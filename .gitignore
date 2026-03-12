@@ -43,6 +43,7 @@ dump.rdb
 # System files
 .DS_Store
 *.pem
+!rds-combined-ca-bundle.pem
 
 # Python (not needed for deployment but safe to keep)
 __pycache__/
